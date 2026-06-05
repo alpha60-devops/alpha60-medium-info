@@ -1,0 +1,1 @@
+aria2c --header="Range: bytes=0-10485759" --seed-time=0 --max-download-limit=0 --select-file=1 --summary-interval=1 -d ./test_download -o test.mkv $src/alpha60-data/torrent/spider-noir-01.test/Spider-Noir.S01E02.Tread.Lightly.720p.HEVC.x265-MeGusta\[EZTVx.to].mkv.torrent

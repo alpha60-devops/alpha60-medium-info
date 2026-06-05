@@ -1,0 +1,18 @@
+media_enrichment/
+├── CMakeLists.txt
+├── docs/
+│   ├── api_specification.md
+│   ├── architecture_overview.md
+│   └── pipeline_diagram.md
+├── src/
+│   ├── main.cpp
+│   ├── torrent_parser.cpp
+│   ├── torrent_parser.hpp
+│   ├── mediainfo_extractor.cpp
+│   ├── mediainfo_extractor.hpp
+│   ├── json_enricher.cpp
+│   └── json_enricher.hpp
+├── scripts/
+│   └── run_enrichment.sh
+├── build/
+└── output/
