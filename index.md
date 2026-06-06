@@ -1,12 +1,12 @@
 Alpha60 Medium Enrichment Pipeline Documentation
 
-Welcome to the documentation for the **MediaInfo Enrichment Pipeline**. This tool is a batch processing system that parses BitTorrent .torrent files, downloads a minimal portion of their associated media content, extracts detailed technical metadata using mediainfo, and outputs a structured JSON report.
+Welcome to the documentation for the **Medium Info Enrichment Pipeline**. This tool is a batch processing system that parses BitTorrent .torrent files, downloads a minimal portion of their associated media content, extracts detailed technical metadata using mediainfo, and outputs a structured JSON report.
 
 Documentation Sections
 
-- API Specifications (api_specifications.md) – The schema for the final JSON output.
-- Architecture Overview (architecture_overview.md) – A high-level description of the system's components and design.
-- Pipeline Diagrams (pipeline_diagram.md) – Visual representations of the system's flow and deployment.
+- [API Specifications](/docs/api_specifications.md) – The schema for the final JSON output.
+- [Architecture Overview](/docs/architecture_overview.md) – A high-level description of the system's components and design.
+- [Pipeline Diagrams](/docs/pipeline_diagram.md) – Visual representations of the system's flow and deployment.
 
 Quick Start (tl;dr)
 
@@ -29,9 +29,9 @@ Visuals
 
 The architecture and workflow are illustrated using Mermaid and SVG diagrams found in this directory:
 
-- build-runtime-flow.svg: Build and runtime flow.
-- component-sequence-diagram.svg: Sequence diagram of the main pipeline.
-- container-diagram.svg: C4 container diagram.
-- data-structure-diagram.svg: Class/struct diagram of core data models.
-- deployment-diagram.svg: Deployment layout on Fedora.
-- legend.svg: Legend for the diagrams.
+- [Build and runtime flow](/docs/build-runtime-flow.svg)
+- [Sequence diagram of the main pipeline](/docs/component-sequence-diagram.svg)
+- [Container diagram](/docs/container-diagram.svg)
+- [Core data models](/docs/data-structure-diagram.svg)
+- [Deployment workflow](/docs/deployment-diagram.svg)
+- [Legend](/docs/legend.svg)
