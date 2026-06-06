@@ -47,10 +47,12 @@ void TorrentDownloader::drain_alerts() {
     }
 }
 
-std::optional<fs::path> TorrentDownloader::download_minimal(
-    const std::string& torrent_path,
-    const std::string& output_dir,
-    std::int64_t bytes_to_download) {
+std::optional<fs::path>
+TorrentDownloader::download_minimal(const std::string& torrent_path,
+				    const std::string& output_dir,
+				    const std::int64_t bytes_to_download,
+				    const int timeout_seconds)
+{
     
     try {
         fs::create_directories(output_dir);
@@ -111,7 +113,6 @@ std::optional<fs::path> TorrentDownloader::download_minimal(
         // Monitor actual file size on disk
         auto target = static_cast<std::uint64_t>(bytes_to_download);
         auto start_time = std::chrono::steady_clock::now();
-        int timeout_seconds = 300;  // 5 minutes
         
         while (true) {
             auto now = std::chrono::steady_clock::now();

@@ -14,23 +14,26 @@
 namespace fs = std::filesystem;
 namespace lt = libtorrent;
 
-class TorrentDownloader {
+/// Downloader encapsulation.
+class TorrentDownloader
+{
 public:
     TorrentDownloader();
     ~TorrentDownloader();
-    
-    // Download only the first 'bytes_to_download' bytes of the media file
-    // Returns path to the downloaded partial file, or empty if failed
-    std::optional<fs::path> download_minimal(
-        const std::string& torrent_path,
-        const std::string& output_dir,
-        std::int64_t bytes_to_download = 10 * 1024 * 1024  // 10 MB default
-    );
-    
+
+  // Download only the first 'bytes_to_download' bytes of the media file
+  // Returns path to the downloaded partial file, or empty if failed
+  // 10 MB default,
+  std::optional<fs::path> download_minimal(
+	const std::string& torrent_path,
+	const std::string& output_dir,
+	const std::int64_t bytes_to_download = 10 * 1024 * 1024,
+	const int timeout_seconds = 300);
+
 private:
     lt::session session_;
     std::atomic<bool> session_running_{true};
-    
+
     void drain_alerts();
 };
 
