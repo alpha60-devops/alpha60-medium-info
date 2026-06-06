@@ -48,15 +48,14 @@ std::string JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
         ss << "        \"language\": " << json_string(md.language) << ",\n";
         
         // Video fields
-        ss << "        \"video_codec\": " << json_string(md.video.codec) << ",\n";
+        ss << "        \"video_codec_id\": " << json_string(md.video.codec_id) << ",\n";
         ss << "        \"video_codec_version\": " << json_string(md.video.codec_version) << ",\n";
         ss << "        \"video_bitrate\": " << (md.video.bitrate > 0 ? std::to_string(md.video.bitrate) : "null") << ",\n";
+        ss << "        \"video_frame_rate\": " << json_string(md.video.frame_rate) << ",\n";
+        ss << "        \"video_color_space\": " << json_string(md.video.color_space) << ",\n";
         ss << "        \"video_width\": " << (md.video.width > 0 ? std::to_string(md.video.width) : "null") << ",\n";
         ss << "        \"video_height\": " << (md.video.height > 0 ? std::to_string(md.video.height) : "null") << ",\n";
-        ss << "        \"video_width_sampled\": " << (md.video.sampled_width > 0 ? std::to_string(md.video.sampled_width) : "null") << ",\n";
-        ss << "        \"video_height_sampled\": " << (md.video.sampled_height > 0 ? std::to_string(md.video.sampled_height) : "null") << ",\n";
         ss << "        \"video_creation_metadata\": " << json_string(md.video_creation_metadata) << ",\n";
-        ss << "        \"video_frame_rate\": " << json_string(md.video.frame_rate) << ",\n";
         
         // Audio fields
         ss << "        \"audio_codec\": " << json_string(md.audio.codec) << ",\n";
@@ -65,14 +64,6 @@ std::string JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
         ss << "        \"audio_sampling_rate\": " << (md.audio.sampling_rate > 0 ? std::to_string(md.audio.sampling_rate) : "null") << ",\n";
         ss << "        \"audio_channels\": " << json_string(md.audio.channels) << ",\n";
         ss << "        \"audio_bit_depth\": " << (md.audio.bit_depth > 0 ? std::to_string(md.audio.bit_depth) : "null") << ",\n";
-        
-        // Audio languages array
-        ss << "        \"audio_languages\": [";
-        for (size_t j = 0; j < md.audio.languages.size(); ++j) {
-            if (j > 0) ss << ", ";
-            ss << "\"" << escape_json_string(md.audio.languages[j]) << "\"";
-        }
-        ss << "],\n";
         
         // Subtitle fields
         ss << "        \"subtitle_languages\": [";

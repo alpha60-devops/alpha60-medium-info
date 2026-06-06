@@ -10,14 +10,13 @@
 namespace fs = std::filesystem;
 
 struct VideoInfo {
-    std::string codec;
+    std::string codec_id;
     std::string codec_version;
     std::int64_t bitrate;
     int width;
     int height;
-    int sampled_width;
-    int sampled_height;
     std::string frame_rate;
+    std::string color_space;
 };
 
 struct AudioInfo {
@@ -27,7 +26,6 @@ struct AudioInfo {
     int sampling_rate;
     std::string channels;
     int bit_depth;
-    std::vector<std::string> languages;
 };
 
 struct SubtitleInfo {
