@@ -1,4 +1,8 @@
 #include "torrent_downloader.hpp"
+#include <iostream>
+#include <fstream>
+#include <chrono>
+#include <thread>
 
 namespace lt = libtorrent;
 
@@ -15,7 +19,6 @@ make_settings_pack()
   // Bittorrent port range is 6881-6889. KG requires 49152-65535.
   settings.set_str(settings_pack::listen_interfaces, "0.0.0.0:65505");
 
-  //string ua("alpha60.co/" LIBTORRENT_VERSION);
   string ua(LIBTORRENT_VERSION);
   settings.set_str(settings_pack::user_agent, ua);
 
@@ -59,7 +62,10 @@ media_downloader::media_downloader()
 }
 
 media_downloader::~media_downloader()
-{ session_.abort(); }
+{
+  session_running_ = false;
+  session_.abort();
+}
 
 void
 media_downloader::drain_alerts()
@@ -90,14 +96,27 @@ media_downloader::download_minimal(const std::string& torrent_path,
       if (ti->num_files() == 0)
 	return std::nullopt;
 
-      // Get output file path
+      // Find the largest file in the torrent
       const auto& files = ti->files();
-      auto first_file_path = files.file_path(lt::file_index_t(0));
-      fs::path output_file_path = fs::path(output_dir) / first_file_path;
+      lt::file_index_t largest_file_index{0};
+      std::int64_t max_size = -1;
+
+      for (int i = 0; i < ti->num_files(); ++i) {
+	  lt::file_index_t idx{i};
+	  if (files.file_size(idx) > max_size) {
+	      max_size = files.file_size(idx);
+	      largest_file_index = idx;
+	  }
+      }
+
+      // Get output file path
+      auto target_file_path = files.file_path(largest_file_index);
+      fs::path output_file_path = fs::path(output_dir) / target_file_path;
       fs::create_directories(output_file_path.parent_path());
 
-      std::cout << "  File: " << first_file_path << std::endl;
-      std::cout << "  Target: " << bytes_to_download / (1024*1024) << " MB" << std::endl;
+      std::cout << "  Targeting largest file: " << target_file_path << std::endl;
+      std::cout << "  File total size: " << max_size / (1024 * 1024) << " MB" << std::endl;
+      std::cout << "  Download Target: " << bytes_to_download / (1024 * 1024) << " MB" << std::endl;
 
       // Setup download parameters
       lt::add_torrent_params params = {};
@@ -105,10 +124,10 @@ media_downloader::download_minimal(const std::string& torrent_path,
       params.save_path = output_dir;
       params.flags = lt::torrent_flags_t{};
 
-      // Only download the first file
+      // Priority mapping: Only download the largest file
       std::vector<lt::download_priority_t> priorities;
       priorities.resize(ti->num_files(), lt::download_priority_t{0});
-      priorities[0] = lt::download_priority_t{1};
+      priorities[static_cast<int>(largest_file_index)] = lt::download_priority_t{1};
       params.file_priorities = priorities;
 
       // Add torrent
@@ -135,11 +154,10 @@ media_downloader::download_minimal(const std::string& torrent_path,
       // Force tracker announce
       handle.force_reannounce();
 
-      // Monitor actual file size on disk
-      auto target = static_cast<std::uint64_t>(bytes_to_download);
+      auto target = static_cast<std::int64_t>(bytes_to_download);
       auto start_time = std::chrono::steady_clock::now();
 
-      while (true) {
+      while (session_running_) {
 	auto now = std::chrono::steady_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
 
@@ -148,42 +166,25 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  break;
 	}
 
-	// Check actual file on disk
-	if (fs::exists(output_file_path)) {
-	  auto file_size = fs::file_size(output_file_path);
+    auto status = handle.status();
 
-	  if (file_size >= target && file_size > 0) {
-	    // Verify we have real data (not zeros)
-	    std::ifstream verify(output_file_path, std::ios::binary);
-	    char first_byte;
-	    verify.read(&first_byte, 1);
-	    verify.close();
+    // Explicitly check the payload bytes downloaded from peers
+    if (status.total_payload_download >= target) {
+	std::cout << "  Downloaded " << status.total_payload_download / (1024*1024) << " MB" << std::endl;
+	break;
+    }
 
-	    if (first_byte != 0) {
-	      std::cout << "  Downloaded " << file_size / (1024*1024) << " MB" << std::endl;
-	      break;
-	    }
-	  }
-
-	  // Show progress
-	  static auto last_progress = start_time;
-	  if (elapsed - std::chrono::duration_cast<std::chrono::seconds>(last_progress - start_time).count() >= 5) {
-	    if (file_size > 0) {
-	      std::cout << "  Progress: " << file_size / (1024*1024)
-			<< " MB / " << target / (1024*1024) << " MB" << std::endl;
-	    } else if (elapsed % 10 == 0) {
-	      auto status = handle.status();
-	      std::cout << "  Peers: " << status.num_peers << std::endl;
-	    }
-	    last_progress = now;
-	  }
-	} else {
-	  // File doesn't exist yet
-	  if (elapsed % 10 == 0 && elapsed > 0) {
-	    auto status = handle.status();
-	    std::cout << "  Waiting for file creation, peers: " << status.num_peers << std::endl;
-	  }
+    // Show progress
+    static auto last_progress = start_time;
+    if (elapsed - std::chrono::duration_cast<std::chrono::seconds>(last_progress - start_time).count() >= 5) {
+	if (status.total_payload_download > 0) {
+	    std::cout << "  Progress: " << status.total_payload_download / (1024*1024)
+	    << " MB / " << target / (1024*1024) << " MB" << std::endl;
+	} else if (elapsed % 10 == 0) {
+	    std::cout << "  Peers: " << status.num_peers << std::endl;
 	}
+	last_progress = now;
+    }
 
 	drain_alerts();
 	std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -193,8 +194,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
       handle.pause();
       session_.remove_torrent(handle);
 
-      // Verify we have real data
-      if (fs::exists(output_file_path) && fs::file_size(output_file_path) >= target) {
+      // Verify we have real data on disk
+      if (fs::exists(output_file_path) && fs::file_size(output_file_path) > 0) {
 	std::ifstream verify(output_file_path, std::ios::binary);
 	char first_byte;
 	verify.read(&first_byte, 1);
