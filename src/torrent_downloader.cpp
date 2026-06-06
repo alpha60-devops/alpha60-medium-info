@@ -84,18 +84,21 @@ media_downloader::drain_alerts()
 
 /// Copy the first N bytes from source file to destination file
 static bool
-copy_first_n_bytes(const fs::path& source, const fs::path& destination, std::int64_t num_bytes)
+copy_first_n_bytes(const fs::path& source, const fs::path& destination,
+		   const std::int64_t num_bytes)
 {
   std::ifstream src(source, std::ios::binary);
-  if (!src.is_open()) {
-    std::cerr << "  [ERROR] Cannot open source file: " << source << std::endl;
-    return false;
-  }
+  if (!src.is_open())
+    {
+      std::cerr << "[ERROR] Cannot open source file: " << source << std::endl;
+      return false;
+    }
 
   std::ofstream dst(destination, std::ios::binary);
-  if (!dst.is_open()) {
-    std::cerr << "  [ERROR] Cannot create destination file: " << destination << std::endl;
-    return false;
+  if (!dst.is_open())
+    {
+      std::cerr << "[ERROR] Cannot create destination file: " << destination << std::endl;
+      return false;
   }
 
   const size_t buffer_size = 1024 * 1024; // 1MB buffer
@@ -103,30 +106,39 @@ copy_first_n_bytes(const fs::path& source, const fs::path& destination, std::int
   std::int64_t remaining = num_bytes;
   std::int64_t total_copied = 0;
 
-  while (remaining > 0) {
-    size_t to_read = static_cast<size_t>(std::min(remaining, static_cast<std::int64_t>(buffer_size)));
-    src.read(buffer.data(), to_read);
-    std::streamsize bytes_read = src.gcount();
-    if (bytes_read == 0) break;
-    dst.write(buffer.data(), bytes_read);
-    remaining -= bytes_read;
-    total_copied += bytes_read;
-  }
+  while (remaining > 0)
+    {
+      size_t to_read = static_cast<size_t>(std::min(remaining, static_cast<std::int64_t>(buffer_size)));
+      src.read(buffer.data(), to_read);
+      std::streamsize bytes_read = src.gcount();
+      if (bytes_read == 0)
+	break;
+      dst.write(buffer.data(), bytes_read);
+      remaining -= bytes_read;
+      total_copied += bytes_read;
+    }
 
   dst.flush();
   dst.close();
   src.close();
 
-  std::cout << "  Copied " << total_copied / (1024*1024) << " MB to " << destination.filename() << std::endl;
+  std::cout << "  Copied " << total_copied / (1024*1024)
+	    << " MB to " << destination.filename() << std::endl;
   return total_copied >= num_bytes;
 }
 
+
+// Download the file, but stop at 10MB and use that.
 std::optional<fs::path>
 media_downloader::download_minimal(const std::string& torrent_path,
 				   const std::string& output_dir,
 				   const std::int64_t bytes_to_download,
 				   const int timeout_seconds)
 {
+  // Return sized_file_path file, as that is the small one.
+  fs::path final_file_path;
+  fs::path sized_file_path;
+
   try
     {
       fs::create_directories(output_dir);
@@ -137,21 +149,23 @@ media_downloader::download_minimal(const std::string& torrent_path,
       if (ti->num_files() == 0)
 	return std::nullopt;
 
+      // Find the largest file, and prepare to download that.
       const auto& files = ti->files();
       lt::file_index_t largest_file_index{0};
       std::int64_t max_size = -1;
-
-      for (int i = 0; i < ti->num_files(); ++i) {
+      for (int i = 0; i < ti->num_files(); ++i)
+	{
 	  lt::file_index_t idx{i};
-	  if (files.file_size(idx) > max_size) {
+	  if (files.file_size(idx) > max_size)
+	    {
 	      max_size = files.file_size(idx);
 	      largest_file_index = idx;
-	  }
-      }
+	    }
+	}
 
       auto target_file_path = files.file_path(largest_file_index);
-      fs::path final_file_path = fs::path(output_dir) / target_file_path;
-      fs::path sized_file_path = final_file_path.string() + ".sized";
+      final_file_path = fs::path(output_dir) / target_file_path;
+      sized_file_path = final_file_path.string() + ".sized";
       fs::create_directories(final_file_path.parent_path());
 
       std::cout << "  Targeting largest file: " << target_file_path << std::endl;
@@ -172,16 +186,19 @@ media_downloader::download_minimal(const std::string& torrent_path,
       lt::torrent_handle handle = session_.add_torrent(std::move(params));
 
       std::cout << "  Waiting for metadata..." << std::endl;
-      for (int attempt = 0; attempt < 60; ++attempt) {
-	if (handle.status().has_metadata) break;
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
-	drain_alerts();
-      }
+      for (int attempt = 0; attempt < 60; ++attempt)
+	{
+	  if (handle.status().has_metadata)
+	    break;
+	  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	  drain_alerts();
+	}
 
-      if (!handle.status().has_metadata) {
-	session_.remove_torrent(handle);
-	return std::nullopt;
-      }
+      if (!handle.status().has_metadata)
+	{
+	  session_.remove_torrent(handle);
+	  return std::nullopt;
+	}
 
       std::cout << "  Metadata received, enabling sequential download..." << std::endl;
       handle.set_flags(lt::torrent_flags::sequential_download);
@@ -189,6 +206,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
       handle.force_reannounce();
 
       auto target = static_cast<std::int64_t>(bytes_to_download);
+      const double target_mb = double(target) / (1024.0 * 1024.0);
+
       auto start_time = std::chrono::steady_clock::now();
       auto last_status_time = start_time;
 
@@ -198,71 +217,88 @@ media_downloader::download_minimal(const std::string& torrent_path,
       bool data_confirmed = false;
       bool sized_file_created = false;
 
-      while (session_running_) {
-	auto now = std::chrono::steady_clock::now();
-	auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-
-	if (elapsed > timeout_seconds) {
-	  std::cerr << "  Timeout after " << timeout_seconds << " seconds" << std::endl;
-	  break;
-	}
-
-	auto status = handle.status();
-
-	// Check if we've reached the target
-	if (status.total_payload_download >= target && data_confirmed) {
-	    std::cout << "  Downloaded " << status.total_payload_download / (1024*1024) << " MB" << std::endl;
-	    break;
-	}
-
-	// Check actual file on disk for non-zero data
-	if (!data_confirmed && fs::exists(final_file_path) && fs::file_size(final_file_path) > 0) {
-	    std::ifstream verify(final_file_path, std::ios::binary);
-	    char first_byte;
-	    verify.read(&first_byte, 1);
-	    verify.close();
-	    if (first_byte != 0) {
-		data_confirmed = true;
-		std::cout << "  Data confirmed on disk at offset 0" << std::endl;
+      // Start loop...
+      // End when:
+      /// 1: enough to make sized_file
+      /// 2: timeout
+      while (session_running_ && !sized_file_created)
+	{
+	  // Start clock.
+	  auto now = std::chrono::steady_clock::now();
+	  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+	  if (elapsed > timeout_seconds)
+	    {
+	      std::cerr << "  Timeout after " << timeout_seconds << " seconds" << std::endl;
+	      break;
 	    }
-	}
 
-	// Create .sized file once we have enough data
-	if (data_confirmed && !sized_file_created && fs::exists(final_file_path)) {
-	    auto current_size = fs::file_size(final_file_path);
-	    if (current_size >= static_cast<std::uint64_t>(target)) {
-		std::cout << "  Creating .sized file with first " << target / (1024*1024) << " MB..." << std::endl;
-		if (copy_first_n_bytes(final_file_path, sized_file_path, target)) {
-		    sized_file_created = true;
-		    std::cout << "  ✓ Created: " << sized_file_path.filename() << std::endl;
-		} else {
-		    std::cerr << "  ✗ Failed to create .sized file" << std::endl;
+	  // Get status.
+	  // Check if we've reached the target
+	  auto status = handle.status();
+	  double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
+	  if (downloaded_mb >= target_mb && data_confirmed)
+	    {
+	      std::cout << "  Downloaded " << status.total_payload_download / (1024*1024) << " MB" << std::endl;
+	      break;
+	    }
+
+	  // Confirm data on disk.
+	  // Check actual file on disk for non-zero data
+	  const bool ff_created = fs::exists(final_file_path);
+	  const auto ff_size = ff_created ? fs::file_size(final_file_path) : 0;
+	  if (ff_created && !data_confirmed && ff_size > 0)
+	    {
+	      std::ifstream verify(final_file_path, std::ios::binary);
+	      char first_byte;
+	      verify.read(&first_byte, 1);
+	      verify.close();
+	      if (first_byte != 0)
+		{
+		  data_confirmed = true;
+		  std::cout << "  Data confirmed on disk at offset 0" << std::endl;
 		}
 	    }
-	}
 
-	// Calculate current download rate
-	auto rate_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_rate_time).count();
-	if (rate_elapsed >= 5 && status.total_payload_download > 0) {
-	    std::int64_t delta_bytes = status.total_payload_download - last_downloaded;
-	    current_rate_bps = static_cast<double>(delta_bytes) / static_cast<double>(rate_elapsed);
-	    last_downloaded = status.total_payload_download;
-	    last_rate_time = now;
-	}
+	  // Create .sized file once we have enough data
+	  if (ff_created && data_confirmed && !sized_file_created)
+	  {
+	    if (ff_size >= static_cast<std::uint64_t>(target))
+	      {
+		std::cout << "  Creating .sized file with first " << target / (1024*1024) << " MB..." << std::endl;
+		if (copy_first_n_bytes(final_file_path, sized_file_path, target))
+		  {
+		    sized_file_created = true;
+		    std::cout << "  ✓ Created: " << sized_file_path.filename() << std::endl;
+		  }
+		else
+		  std::cerr << "  ✗ Failed to create .sized file" << std::endl;
+	    }
+	  }
 
-	// Show progress every 5 seconds
+	  // Calculate current download rate
+	  auto rate_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_rate_time).count();
+	  if (rate_elapsed >= 5 && status.total_payload_download > 0)
+	    {
+	      std::int64_t delta_bytes = status.total_payload_download - last_downloaded;
+	      current_rate_bps = static_cast<double>(delta_bytes) / static_cast<double>(rate_elapsed);
+	      last_downloaded = status.total_payload_download;
+	      last_rate_time = now;
+	    }
+
+	// Show progress every n second interval.
+	const auto status_interval = 5;
 	auto status_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_status_time).count();
-	if (status_elapsed >= 5) {
-	    double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
-	    double target_mb = target / (1024.0 * 1024.0);
+	if (status_elapsed >= status_interval)
+	  {
 	    double rate_kbps = current_rate_bps / 1024.0;
 	    std::cout << std::fixed << std::setprecision(2);
 	    std::cout << "  Peers: " << status.num_peers
 		      << " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
 		      << " | Speed: " << rate_kbps << " KB/s";
-	    if (data_confirmed && fs::exists(final_file_path)) {
+	    if (data_confirmed && ff_created)
+	      {
 		std::cout << " | Disk: " << fs::file_size(final_file_path) / (1024*1024) << " MB";
-	    }
+	      }
 	    if (sized_file_created) {
 		std::cout << " | .sized: ✓";
 	    }
@@ -271,49 +307,70 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	}
 
 	// Force a flush periodically
-	if (elapsed % 5 == 0 && elapsed > 0) {
-	    handle.force_reannounce();
-	}
+	if (elapsed % 5 == 0 && elapsed > 0)
+	  handle.force_reannounce();
 
 	drain_alerts();
 	std::this_thread::sleep_for(std::chrono::seconds(1));
-      }
+	} // while end
 
       // Clean up
       handle.pause();
       session_.remove_torrent(handle);
 
       // If we haven't created the .sized file yet, try one more time
-      if (data_confirmed && !sized_file_created && fs::exists(final_file_path)) {
+      if (data_confirmed && !sized_file_created && fs::exists(final_file_path))
+	{
 	  auto current_size = fs::file_size(final_file_path);
-	  if (current_size >= static_cast<std::uint64_t>(target)) {
-	      std::cout << "  Creating .sized file with first " << target / (1024*1024) << " MB (final attempt)..." << std::endl;
-	      if (copy_first_n_bytes(final_file_path, sized_file_path, target)) {
+	  if (current_size >= static_cast<std::uint64_t>(target))
+	    {
+	      std::cout << "  Creating .sized file with first "
+			<< target / (1024*1024) << " MB (final attempt)..." << std::endl;
+	      if (copy_first_n_bytes(final_file_path, sized_file_path, target))
+		{
 		  sized_file_created = true;
 		  std::cout << "  ✓ Created: " << sized_file_path.filename() << std::endl;
-	      }
-	  }
-      }
+		}
+	    }
+	}
 
       // Final verification: read first byte
-      if (fs::exists(final_file_path) && fs::file_size(final_file_path) > 0) {
+      char first_byte;
+      if (fs::exists(final_file_path) && fs::file_size(final_file_path) > 0)
+	{
 	  std::ifstream verify(final_file_path, std::ios::binary);
-	  char first_byte;
 	  verify.read(&first_byte, 1);
 	  verify.close();
-
-	  if (first_byte != 0) {
-	      std::cout << "  Successfully downloaded " << fs::file_size(final_file_path) / (1024*1024) << " MB" << std::endl;
-	      return final_file_path;
-	  } else {
+	  if (first_byte != 0)
+	    {
+	      // Remove large file and used sized file if possible.
+	      const bool cleanupp(true);
+	      if (cleanupp)
+		{
+		  std::error_code ec;
+		  if (fs::remove(final_file_path, ec))
+		    {
+		      std::cout << "Large pre-allocated file successfully deleted.\n";
+		      return sized_file_path;
+		    }
+		  else
+		    {
+		      std::cout << "Failed to replace with small file. Error: " << ec.message() << '\n';
+		      return final_file_path;
+		    }
+		}
+	    }
+	  else
+	    {
 	      std::cerr << "  File exists but first byte is zero - no data written to disk" << std::endl;
-	  }
-      }
+	    }
+	}
+      return  std::nullopt;
+    }
 
+  catch (const std::exception& e)
+    {
+      std::cerr << "Exception: " << e.what() << std::endl;
       return std::nullopt;
-
-    } catch (const std::exception& e) {
-    std::cerr << "Exception: " << e.what() << std::endl;
-    return std::nullopt;
-  }
+    }
 }
