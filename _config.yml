@@ -1,0 +1,3 @@
+# _config.yml
+theme: jekyll-theme-minimal   # or your current theme
+mermaid: true
