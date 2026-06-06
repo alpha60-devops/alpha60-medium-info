@@ -26,6 +26,7 @@ struct AudioInfo {
     int sampling_rate;
     std::string channels;
     int bit_depth;
+    std::vector<std::string> languages;
 };
 
 struct SubtitleInfo {
@@ -77,7 +78,11 @@ private:
     fs::path media_file_;
     
     std::string exec_mediainfo();
+    std::string exec_ffprobe();
+    
     bool parse_json_output(const std::string& json_output, MediaInfoData& data);
+    bool parse_ffprobe_output(const std::string& json_output, MediaInfoData& data);
+    
     std::string extract_string_value(const rapidjson::Value& obj, const char* key);
     std::int64_t extract_int64_value(const rapidjson::Value& obj, const char* key);
     double extract_double_value(const rapidjson::Value& obj, const char* key);

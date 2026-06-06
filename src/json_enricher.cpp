@@ -65,6 +65,14 @@ std::string JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
         ss << "        \"audio_channels\": " << json_string(md.audio.channels) << ",\n";
         ss << "        \"audio_bit_depth\": " << (md.audio.bit_depth > 0 ? std::to_string(md.audio.bit_depth) : "null") << ",\n";
         
+        // Audio languages array (Reintroduced for FFprobe deductions)
+        ss << "        \"audio_languages\": [";
+        for (size_t j = 0; j < md.audio.languages.size(); ++j) {
+            if (j > 0) ss << ", ";
+            ss << "\"" << escape_json_string(md.audio.languages[j]) << "\"";
+        }
+        ss << "],\n";
+        
         // Subtitle fields
         ss << "        \"subtitle_languages\": [";
         for (size_t j = 0; j < md.subtitle.languages.size(); ++j) {
