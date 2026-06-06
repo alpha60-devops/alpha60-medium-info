@@ -10,6 +10,13 @@
 #include <algorithm>
 #include <iostream>
 
+// Custom deleter for FILE* using pclose
+struct PcloseDeleter {
+    void operator()(FILE* f) const {
+        if (f) pclose(f);
+    }
+};
+
 MediaInfoExtractor::MediaInfoExtractor(const fs::path& media_file)
     : media_file_(media_file) {}
 
@@ -46,13 +53,14 @@ std::string MediaInfoExtractor::exec_mediainfo() {
     std::array<char, 256> buffer;
     std::string result;
     
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
+    FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         std::cerr << "  [MediaInfo] Failed to execute mediainfo" << std::endl;
         return "";
     }
+    std::unique_ptr<FILE, PcloseDeleter> pipe_ptr(pipe);
     
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    while (fgets(buffer.data(), buffer.size(), pipe_ptr.get()) != nullptr) {
         result += buffer.data();
     }
     return result;
@@ -63,13 +71,14 @@ std::string MediaInfoExtractor::exec_ffprobe() {
     std::array<char, 256> buffer;
     std::string result;
     
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
+    FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         std::cerr << "  [FFprobe] Failed to execute ffprobe" << std::endl;
         return "";
     }
+    std::unique_ptr<FILE, PcloseDeleter> pipe_ptr(pipe);
     
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    while (fgets(buffer.data(), buffer.size(), pipe_ptr.get()) != nullptr) {
         result += buffer.data();
     }
     return result;

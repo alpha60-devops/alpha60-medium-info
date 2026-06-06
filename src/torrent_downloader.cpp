@@ -25,28 +25,28 @@ make_settings_pack()
 
   settings.set_bool(settings_pack::enable_lsd, true);
   settings.set_bool(settings_pack::enable_dht, true);
-  settings.set_bool(settings_pack::enable_upnp, true); // 2026.1
-  settings.set_bool(settings_pack::enable_natpmp, true); // 2026.2
+  settings.set_bool(settings_pack::enable_upnp, true);
+  settings.set_bool(settings_pack::enable_natpmp, true);
 
   settings.set_bool(settings_pack::announce_to_all_tiers, true);
   settings.set_bool(settings_pack::announce_to_all_trackers, true);
 
-  settings.set_int(settings_pack::active_limit, 1);
+  settings.set_int(settings_pack::active_limit, 8);
 
-  settings.set_int(settings_pack::upload_rate_limit, 120);
-  settings.set_int(settings_pack::download_rate_limit, 120);
-  settings.set_int(settings_pack::auto_scrape_interval, 60); // 1800
-  settings.set_int(settings_pack::auto_scrape_min_interval, 30); // 300
+  // REMOVE ARTIFICIAL SPEED LIMITS (0 = unlimited)
+  settings.set_int(settings_pack::upload_rate_limit, 0);
+  settings.set_int(settings_pack::download_rate_limit, 0);
 
-  settings.set_int(settings_pack::max_pex_peers, 5000); // 50
+  settings.set_int(settings_pack::auto_scrape_interval, 60);
+  settings.set_int(settings_pack::auto_scrape_min_interval, 30);
 
-  // Global limit, default is 200. Per torrent limit via torrent_handle.
+  settings.set_int(settings_pack::max_pex_peers, 5000);
+
   settings.set_int(settings_pack::num_want, 1600);
   settings.set_int(settings_pack::connections_limit, 5000);
 
-  // Set timeouts.
-  settings.set_int(settings_pack::peer_timeout, 30); // 120
-  settings.set_int(settings_pack::inactivity_timeout, 30); // 600
+  settings.set_int(settings_pack::peer_timeout, 30);
+  settings.set_int(settings_pack::inactivity_timeout, 30);
 
   return settings;
 }
@@ -125,7 +125,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
       params.save_path = output_dir;
       params.flags = lt::torrent_flags_t{};
 
-      // FIX: Use priority 7 (normal) instead of 1 (low)
+      // Set normal priority (7) for the largest file, skip others (0)
       std::vector<lt::download_priority_t> priorities;
       priorities.resize(ti->num_files(), lt::download_priority_t{0});
       priorities[static_cast<int>(largest_file_index)] = lt::download_priority_t{7};
@@ -149,38 +149,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
       std::cout << "  Metadata received, enabling sequential download..." << std::endl;
 
-      // Enable sequential download to get the beginning of the file first
-      handle.set_sequential_download(true);
-
-      // FIX: Restrict download to first N bytes via piece priorities
-      auto status = handle.status();
-      if (status.has_metadata) {
-	  const lt::torrent_info& ti2 = handle.get_torrent_info();
-	  const lt::file_storage& fs = ti2.files();
-	  lt::file_index_t largest_idx = largest_file_index;
-	  std::int64_t bytes_needed = bytes_to_download;
-	  std::int64_t file_offset = fs.file_offset(largest_idx);
-	  std::int64_t file_size = fs.file_size(largest_idx);
-
-	  // Don't request more than the file size
-	  if (bytes_needed > file_size) bytes_needed = file_size;
-
-	  std::int64_t start_byte = file_offset;
-	  std::int64_t end_byte = std::min(file_offset + bytes_needed, file_offset + file_size);
-
-	  std::vector<lt::download_priority_t> piece_priorities(ti2.num_pieces(), 0);
-
-	  for (int piece = 0; piece < ti2.num_pieces(); ++piece) {
-	      std::int64_t piece_start = static_cast<std::int64_t>(piece) * ti2.piece_length();
-	      std::int64_t piece_end = piece_start + ti2.piece_size(piece);
-	      if (piece_end > start_byte && piece_start < end_byte) {
-		  piece_priorities[piece] = 7; // normal priority
-	      }
-	  }
-	  handle.prioritize_pieces(piece_priorities);
-	  std::cout << "  Restricted download to first " << bytes_needed / (1024*1024)
-		    << " MB via piece priorities" << std::endl;
-      }
+      // Enable sequential download using non-deprecated flag method
+      handle.set_flags(lt::torrent_flags::sequential_download);
 
       // Force tracker announce
       handle.force_reannounce();
@@ -190,7 +160,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
       int zero_peer_count = 0;
       bool data_started = false;
       auto last_status_time = start_time;
-
+      
       // For rate calculation
       std::int64_t last_downloaded = 0;
       auto last_rate_time = start_time;
@@ -204,64 +174,64 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
 	if (elapsed > timeout_seconds) {
 	  failure_reason = "timeout";
-	  download_failed = true;
+          download_failed = true;
 	  break;
 	}
 
-	auto status = handle.status();
+        auto status = handle.status();
 
-	// Check if we have any payload download
-	if (status.total_payload_download > 0) {
-	    data_started = true;
-	    zero_peer_count = 0;
-	}
+        // Check if we have any payload download
+        if (status.total_payload_download > 0) {
+            data_started = true;
+            zero_peer_count = 0;
+        }
 
-	// Explicitly check the payload bytes downloaded from peers
-	if (status.total_payload_download >= target) {
+        // Check if we've reached the target
+        if (status.total_payload_download >= target) {
 	    std::cout << "  Downloaded " << status.total_payload_download / (1024*1024) << " MB" << std::endl;
 	    break;
-	}
+        }
 
-	// Early abort if we have peers but no data for too long
-	if (status.num_peers == 0) {
-	    zero_peer_count++;
-	    if (zero_peer_count > 30 && !data_started) {
-		failure_reason = "no peers found for 30 seconds";
-		download_failed = true;
-		break;
-	    }
-	} else {
-	    zero_peer_count = 0;
-	}
+        // Early abort if no peers and no data for too long
+        if (status.num_peers == 0) {
+            zero_peer_count++;
+            if (zero_peer_count > 30 && !data_started) {
+                failure_reason = "no peers found for 30 seconds";
+                download_failed = true;
+                break;
+            }
+        } else {
+            zero_peer_count = 0;
+        }
 
-	// Calculate current download rate (bytes per second)
-	auto rate_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_rate_time).count();
-	if (rate_elapsed >= 5 && data_started) {
-	    std::int64_t delta_bytes = status.total_payload_download - last_downloaded;
-	    current_rate_bps = static_cast<double>(delta_bytes) / static_cast<double>(rate_elapsed);
-	    last_downloaded = status.total_payload_download;
-	    last_rate_time = now;
-	}
+        // Calculate current download rate (bytes per second)
+        auto rate_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_rate_time).count();
+        if (rate_elapsed >= 5 && data_started) {
+            std::int64_t delta_bytes = status.total_payload_download - last_downloaded;
+            current_rate_bps = static_cast<double>(delta_bytes) / static_cast<double>(rate_elapsed);
+            last_downloaded = status.total_payload_download;
+            last_rate_time = now;
+        }
 
-	// Show progress every 5 seconds with both peer count AND downloaded bytes
-	auto status_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_status_time).count();
-	if (status_elapsed >= 5) {
-	    double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
-	    double target_mb = target / (1024.0 * 1024.0);
-	    double rate_kbps = current_rate_bps / 1024.0;
-	    std::cout << std::fixed << std::setprecision(2);
-	    std::cout << "  Peers: " << status.num_peers
-		      << " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
-		      << " | Speed: " << rate_kbps << " KB/s";
-	    if (current_rate_bps > 0 && data_started) {
-		double eta_seconds = (target - status.total_payload_download) / current_rate_bps;
-		if (eta_seconds > 0 && eta_seconds < 3600) {
-		    std::cout << " | ETA: " << static_cast<int>(eta_seconds) << "s";
-		}
-	    }
-	    std::cout << std::endl;
-	    last_status_time = now;
-	}
+        // Show progress every 5 seconds
+        auto status_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_status_time).count();
+        if (status_elapsed >= 5) {
+            double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
+            double target_mb = target / (1024.0 * 1024.0);
+            double rate_kbps = current_rate_bps / 1024.0;
+            std::cout << std::fixed << std::setprecision(2);
+            std::cout << "  Peers: " << status.num_peers 
+                      << " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
+                      << " | Speed: " << rate_kbps << " KB/s";
+            if (current_rate_bps > 0 && data_started) {
+                double eta_seconds = (target - status.total_payload_download) / current_rate_bps;
+                if (eta_seconds > 0 && eta_seconds < 3600) {
+                    std::cout << " | ETA: " << static_cast<int>(eta_seconds) << "s";
+                }
+            }
+            std::cout << std::endl;
+            last_status_time = now;
+        }
 
 	drain_alerts();
 	std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -271,33 +241,32 @@ media_downloader::download_minimal(const std::string& torrent_path,
       handle.pause();
       session_.remove_torrent(handle);
 
-      // If download failed but we have some data, estimate full download time
-      if (download_failed && data_started && current_rate_bps > 0) {
-	  std::int64_t downloaded_bytes = 0;
-	  try {
-	      if (fs::exists(output_file_path)) {
-		  downloaded_bytes = fs::file_size(output_file_path);
-	      }
-	  } catch (...) {
-	      downloaded_bytes = 0;
-	  }
-
+      // If download failed but we have some data, estimate time to complete TARGET (not full file)
+      if (download_failed && data_started && current_rate_bps > 0)
+	{
+	  auto status = handle.status(); // get fresh status
+	  std::int64_t downloaded_bytes = status.total_payload_download;
 	  double downloaded_mb = downloaded_bytes / (1024.0 * 1024.0);
+	  double target_mb = target / (1024.0 * 1024.0);
 	  double rate_kbps = current_rate_bps / 1024.0;
-	  double total_file_mb = max_size / (1024.0 * 1024.0);
-	  double remaining_bytes = max_size - downloaded_bytes;
-	  double eta_seconds = remaining_bytes / current_rate_bps;
-
-	  std::cerr << std::fixed << std::setprecision(2);
-	  std::cerr << "  Download failed (" << failure_reason << ")" << std::endl;
-	  std::cerr << "  Downloaded " << downloaded_mb << " MB of " << target / (1024.0*1024.0)
-		    << " MB target" << std::endl;
-	  std::cerr << "  At current rate (" << rate_kbps << " KB/s), completing the FULL file ("
-		    << total_file_mb << " MB) would take ~" << static_cast<int>(eta_seconds / 60)
-		    << " minutes " << static_cast<int>(eta_seconds) % 60 << " seconds" << std::endl;
-      } else if (download_failed) {
+	  double remaining_bytes = target - downloaded_bytes;
+	  if (remaining_bytes > 0) {
+	      double eta_seconds = remaining_bytes / current_rate_bps;
+	      std::cerr << std::fixed << std::setprecision(2);
+	      std::cerr << "  Download failed (" << failure_reason << ")" << std::endl;
+	      std::cerr << "  Downloaded " << downloaded_mb << " MB of " << target_mb 
+			<< " MB target" << std::endl;
+	      std::cerr << "  At current rate (" << rate_kbps << " KB/s), completing the TARGET ("
+			<< target_mb << " MB) would take ~" << static_cast<int>(eta_seconds / 60) 
+			<< " minutes " << static_cast<int>(eta_seconds) % 60 << " seconds" << std::endl;
+	  } else {
+	      std::cerr << "  Download failed (" << failure_reason << ") but target was reached" << std::endl;
+	  }
+	}
+      else if (download_failed)
+	{
 	  std::cerr << "  Download failed (" << failure_reason << "), no data transferred" << std::endl;
-      }
+	}
 
       // Verify we have real data on disk
       if (!download_failed && fs::exists(output_file_path) && fs::file_size(output_file_path) > 0) {
