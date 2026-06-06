@@ -1,19 +1,21 @@
-Media Objects Content Analysis API - Version 1.0
+# Media Objects Content Analysis API - Version 1.0
 
-Overview
+## Overview
 
 This API defines the output format for enriched media content analysis derived from torrent metadata and mediainfo extraction.
 
 Output Filename: media_objects_content_analysis.json
 
-Top-Level Structure
+## Top-Level Structure
 
+```
 {
   "api_version": "1.0",
   "generated_at": "2026-06-03T20:42:56Z",
   "total_objects": 2,
   "media_objects": [ ... ]
 }
+```
 
 Field             | Type    | Description
 ------------------|---------|--------------------------------------------------------
@@ -22,9 +24,9 @@ generated_at      | string  | ISO 8601 UTC timestamp of file generation
 total_objects     | integer | Number of objects in media_objects array
 media_objects     | array   | Array of MediaObject objects
 
-MediaObject Schema
+## MediaObject Schema
 
-Top-Level Fields
+### Top-Level Fields
 
 Field               | Type   | Required | Description
 --------------------|--------|----------|------------------------------------------------------------
@@ -34,7 +36,7 @@ technical_metadata  | object | Yes      | Container for all extracted technical 
 
 technical_metadata Fields
 
-Originating Source Metadata
+### Originating Source Metadata
 
 Field                         | Type   | Description
 ------------------------------|--------|--------------------------------------------------------------
@@ -42,7 +44,7 @@ originating_source_medium_id | string | Source medium identifier (e.g., "WEB", "
 originating_source_form       | string | Original source format description
 originating_network_name      | string | Original broadcast network or streaming service
 
-Container / General Metadata
+### Container / General Metadata
 
 Field                     | Type    | Description
 --------------------------|---------|--------------------------------------------------------------
@@ -61,7 +63,7 @@ country                   | string  | Country of origin
 comment                   | string  | User or encoding comments
 language                  | string  | Primary language of content (ISO 639-2 three-letter code)
 
-Video Track Metadata
+### Video Track Metadata
 
 Field                   | Type    | Description
 ------------------------|---------|--------------------------------------------------------------
@@ -75,7 +77,7 @@ video_height_sampled    | integer | Sampled/encoded height in pixels
 video_creation_metadata | string  | UTC timestamp of encoding/tagging
 video_frame_rate        | string  | Video frame rate in fps (as string to handle fractions)
 
-Audio Track Metadata
+### Audio Track Metadata
 
 Field                 | Type    | Description
 ----------------------|---------|--------------------------------------------------------------
@@ -87,58 +89,60 @@ audio_channels        | string  | Channel count (e.g., "2", "6", "8")
 audio_bit_depth       | integer | Bit depth for lossless/high-res audio
 audio_languages       | array   | Array of ISO 639-2 language codes present in audio tracks
 
-Subtitle Track Metadata
+### Subtitle Track Metadata
 
 Field                 | Type   | Description
 ----------------------|--------|--------------------------------------------------------------
 subtitle_languages    | array  | Array of ISO 639-2 language codes present in subtitle tracks
 subtitle_format       | string | Subtitle format (e.g., "UTF-8", "ASS", "SRT") or null if none
 
-Example Output
+## Example Output
 
+```
 {
   "btih": "1d0262a0f4880be8bc8352422836596bc457d03b",
   "name": "Spider-Noir.S01E03.Double.Cross.1080p.HEVC.x265-MeGusta.mkv",
   "technical_metadata": {
-    "originating_source_medium_id": null,
-    "originating_source_form": null,
-    "originating_network_name": null,
-    "format_commercial_if_any": null,
-    "file_size": 684931254,
-    "duration": 2843.132000,
-    "overall_bit_rate": 1927258,
-    "domain": null,
-    "collection": null,
-    "season": null,
-    "distributed_by": null,
-    "genre": null,
-    "content_type": null,
-    "owner": null,
-    "country": null,
-    "comment": null,
-    "language": null,
-    "video_codec": "HEVC",
-    "video_codec_version": null,
-    "video_bitrate": 1312906,
-    "video_width": 1994,
-    "video_height": 1080,
-    "video_width_sampled": null,
-    "video_height_sampled": null,
-    "video_creation_metadata": null,
-    "video_frame_rate": "23.976",
-    "audio_codec": "E-AC-3",
-    "audio_codec_version": null,
-    "audio_bitrate": 576000,
-    "audio_sampling_rate": 48000,
-    "audio_channels": "6",
-    "audio_bit_depth": 32,
-    "audio_languages": [],
-    "subtitle_languages": [],
-    "subtitle_format": "UTF-8"
+	"originating_source_medium_id": null,
+	"originating_source_form": null,
+	"originating_network_name": null,
+	"format_commercial_if_any": null,
+	"file_size": 684931254,
+	"duration": 2843.132000,
+	"overall_bit_rate": 1927258,
+	"domain": null,
+	"collection": null,
+	"season": null,
+	"distributed_by": null,
+	"genre": null,
+	"content_type": null,
+	"owner": null,
+	"country": null,
+	"comment": null,
+	"language": null,
+	"video_codec": "HEVC",
+	"video_codec_version": null,
+	"video_bitrate": 1312906,
+	"video_width": 1994,
+	"video_height": 1080,
+	"video_width_sampled": null,
+	"video_height_sampled": null,
+	"video_creation_metadata": null,
+	"video_frame_rate": "23.976",
+	"audio_codec": "E-AC-3",
+	"audio_codec_version": null,
+	"audio_bitrate": 576000,
+	"audio_sampling_rate": 48000,
+	"audio_channels": "6",
+	"audio_bit_depth": 32,
+	"audio_languages": [],
+	"subtitle_languages": [],
+	"subtitle_format": "UTF-8"
   }
 }
+```
 
-Processing Rules
+##Processing Rules
 
 Multiple Tracks:
 - For audio_languages and subtitle_languages, collect all unique values from all tracks.
