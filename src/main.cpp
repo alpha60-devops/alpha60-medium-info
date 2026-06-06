@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize downloader
     std::cout << "\n[2/3] Downloading media metadata..." << std::endl;
-    TorrentDownloader downloader;
+    media_downloader downloader;
 
     // For each torrent, download minimal media file and extract metadata
     std::vector<MediaInfoData> media_data_list;
