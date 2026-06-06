@@ -94,7 +94,7 @@ flowchart TD
     C --> D[Make Build]
     D --> E[Run Executable with Input Directory]
 
-    E --> F{Input Directory Exists?]
+    E --> F{Input Directory Exists?}
     F -->|No| G[Error]
     F -->|Yes| H[Parse .torrent files]
 
