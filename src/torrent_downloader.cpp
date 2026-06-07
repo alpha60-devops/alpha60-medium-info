@@ -4,6 +4,10 @@
 #include <chrono>
 #include <thread>
 #include <iomanip>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
+#include <cerrno>
 
 namespace lt = libtorrent;
 
@@ -121,6 +125,17 @@ copy_first_n_bytes(const fs::path& source, const fs::path& destination,
   dst.flush();
   dst.close();
   src.close();
+
+  // Ensure data is written to disk before returning
+  int fd = open(destination.string().c_str(), O_WRONLY);
+  if (fd != -1)
+    {
+      if (fsync(fd) == 0)
+	std::cout << "  fsync() confirmed for .sized file" << std::endl;
+      else
+	std::cerr << "  fsync() failed for .sized file: " << strerror(errno) << std::endl;
+      close(fd);
+    }
 
   std::cout << "  Copied " << total_copied / (1024*1024)
 	    << " MB to " << destination.filename() << std::endl;
@@ -250,9 +265,28 @@ media_downloader::download_minimal(const std::string& torrent_path,
 		{
 		  std::cout << "  Flushing cache to disk..." << std::endl;
 
-		  // Give time for flush to complete, instead of responsibly checking alerts.
+		  // libtorrent flush
 		  handle.save_resume_data(lt::torrent_handle::save_info_dict);
 		  handle.flush_cache();
+
+		  // os flush
+
+		  // Get the actual file path that libtorrent is writing to
+		  // Open the file with POSIX for direct fsync
+		  int fd = open(final_file_path.string().c_str(), O_RDONLY);
+		  if (fd != -1)
+		    {
+		      std::cout << "  Calling fsync() on file descriptor..." << std::endl;
+		      if (fsync(fd) != 0)
+			std::cerr << "  ✗ fsync() failed: " << strerror(errno) << std::endl;
+		      close(fd);
+		    }
+		  else
+		    {
+		      std::cerr << "  ✗ Cannot open file for fsync: " << strerror(errno) << std::endl;
+		    }
+
+		  // Settle.
 		  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 		}
 	    }
