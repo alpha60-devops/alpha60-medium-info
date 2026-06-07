@@ -162,6 +162,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      largest_file_index = idx;
 	    }
 	}
+      const double max_mb = double(max_size) / (1024.0 * 1024.0);
 
       auto target_file_path = files.file_path(largest_file_index);
       final_file_path = fs::path(output_dir) / target_file_path;
@@ -235,18 +236,33 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  // Get status.
 	  // Check if we've reached the target
 	  auto status = handle.status();
-	  double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
-	  if (downloaded_mb >= target_mb && data_confirmed)
+	  //double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
+	  // status.all_time_download
+	  double downloaded_mb = status.total_done / (1024.0 * 1024.0);
+	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
 	    {
-	      std::cout << "  Downloaded " << status.total_payload_download / (1024*1024) << " MB" << std::endl;
-	      break;
+	      if (data_confirmed)
+		{
+		  std::cout << "  Downloaded enough, hit " << downloaded_mb << " MB" << std::endl;
+		  break;
+		}
+	      else
+		{
+		  std::cout << "  Flushing cache to disk..." << std::endl;
+
+		  // Give time for flush to complete, instead of responsibly checking alerts.
+		  handle.save_resume_data(lt::torrent_handle::save_info_dict);
+		  handle.flush_cache();
+		  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+		}
 	    }
 
 	  // Confirm data on disk.
 	  // Check actual file on disk for non-zero data
 	  const bool ff_created = fs::exists(final_file_path);
 	  const auto ff_size = ff_created ? fs::file_size(final_file_path) : 0;
-	  if (ff_created && !data_confirmed && ff_size > 0)
+	  const bool ff_size_targetp = ff_size >= ulong(target);
+	  if (ff_created && ff_size_targetp && !data_confirmed)
 	    {
 	      std::ifstream verify(final_file_path, std::ios::binary);
 	      char first_byte;
@@ -260,19 +276,17 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	    }
 
 	  // Create .sized file once we have enough data
-	  if (ff_created && data_confirmed && !sized_file_created)
+	  if (ff_size_targetp && data_confirmed && !sized_file_created)
 	  {
-	    if (ff_size >= static_cast<std::uint64_t>(target))
+	    if (copy_first_n_bytes(final_file_path, sized_file_path, target))
 	      {
-		std::cout << "  Creating .sized file with first " << target / (1024*1024) << " MB..." << std::endl;
-		if (copy_first_n_bytes(final_file_path, sized_file_path, target))
-		  {
-		    sized_file_created = true;
-		    std::cout << "  ✓ Created: " << sized_file_path.filename() << std::endl;
-		  }
-		else
-		  std::cerr << "  ✗ Failed to create .sized file" << std::endl;
-	    }
+		sized_file_created = true;
+		std::cout << "  ✓ Created .sized file: " << sized_file_path.filename()
+			  << std::endl;
+		break;
+	      }
+	    else
+	      std::cerr << "  ✗ Failed to create .sized file" << std::endl;
 	  }
 
 	  // Calculate current download rate
@@ -285,33 +299,31 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      last_rate_time = now;
 	    }
 
-	// Show progress every n second interval.
-	const auto status_interval = 5;
-	auto status_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_status_time).count();
-	if (status_elapsed >= status_interval)
-	  {
-	    double rate_kbps = current_rate_bps / 1024.0;
-	    std::cout << std::fixed << std::setprecision(2);
-	    std::cout << "  Peers: " << status.num_peers
-		      << " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
-		      << " | Speed: " << rate_kbps << " KB/s";
-	    if (data_confirmed && ff_created)
-	      {
-		std::cout << " | Disk: " << fs::file_size(final_file_path) / (1024*1024) << " MB";
-	      }
-	    if (sized_file_created) {
+	  // Show progress every n second interval.
+	  const auto status_interval = 5;
+	  auto status_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_status_time).count();
+	  if (status_elapsed >= status_interval)
+	    {
+	      double rate_kbps = current_rate_bps / 1024.0;
+	      std::cout << std::fixed << std::setprecision(2);
+	      std::cout << "  Peers: " << status.num_peers
+			<< " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
+			<< " | Speed: " << rate_kbps << " KB/s";
+	      if (data_confirmed && ff_created)
+		std::cout << " | Disk: " << ff_size / (1024*1024) << " MB";
+	      if (sized_file_created)
 		std::cout << " | .sized: ✓";
+
+	      std::cout << std::endl;
+	      last_status_time = now;
 	    }
-	    std::cout << std::endl;
-	    last_status_time = now;
-	}
 
-	// Force a flush periodically
-	if (elapsed % 5 == 0 && elapsed > 0)
-	  handle.force_reannounce();
+	  // Force a flush periodically
+	  if (elapsed % 5 == 0 && elapsed > 0)
+	    handle.force_reannounce();
 
-	drain_alerts();
-	std::this_thread::sleep_for(std::chrono::seconds(1));
+	  drain_alerts();
+	  std::this_thread::sleep_for(std::chrono::seconds(1));
 	} // while end
 
       // Clean up
