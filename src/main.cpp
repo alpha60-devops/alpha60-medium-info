@@ -40,8 +40,8 @@ int main(int argc, char* argv[]) {
     }
 
     fs::path input_dir = argv[1];
-    fs::path output_file = (argc >= 3) ? argv[2] : "output/media_objects_content_analysis.json";
-    fs::path cache_dir = (argc >= 4) ? argv[3] : "download_cache";
+    fs::path output_file = (argc >= 3) ? argv[2] : "media_objects_medium_info.json";
+    fs::path cache_dir = (argc >= 4) ? argv[3] : "download.cache";
 
     // Validate input directory
     if (!fs::exists(input_dir) || !fs::is_directory(input_dir)) {
