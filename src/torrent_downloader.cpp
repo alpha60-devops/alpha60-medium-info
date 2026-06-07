@@ -54,6 +54,11 @@ make_settings_pack()
   settings.set_int(settings_pack::disk_io_write_mode, 0);
   settings.set_bool(settings_pack::no_atime_storage, true);
 
+  // For downloading and trying to clip for small files, enable this. Don't do it in general.
+  // Force immediate, synchronous writes to disk
+  // This requires libtorrent version >= 2.0.6
+  settings.set_int(settings_pack::disk_io_write_mode, settings_pack::write_through);
+
   return settings;
 }
 
