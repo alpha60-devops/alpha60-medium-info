@@ -198,18 +198,25 @@ const std::ios_base::openmode ofm = std::ios_base::out | std::ios_base::app;
 std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
 
 
-/// Download the file given as an argument, but stop at 10MB and
-/// archive the smaller sized file.
+/// Download a minimum-sized chunk of the largest media file so that mediainfo can
+/// be used to determine the frame rate, frame size, audio and
+/// subtitles.
+///
+/// Download the largest file in the @parm torrent_path given as an argument,
+/// but stop at 10MB (or @param bytes_to_download) and archive the smaller sized file.
+/// @param timeout_seconds the number of seconds to loop while wating for data.
+/// @param output_dir result files
+/// @param fsuffix the suffix used on the minimal media file
 std::optional<fs::path>
 media_downloader::download_minimal(const std::string& torrent_path,
 				   const std::string& output_dir,
 				   const std::int64_t bytes_to_download,
-				   const int timeout_seconds)
+				   const int timeout_seconds,
+				   const string fsuffix = ".sized")
 {
   // Return sized_file_path file whenever possible, as that is the small one.
   using namespace std;
 
-  const string fsuffix = ".sized";
   fs::path final_file_path;
   fs::path sized_file_path;
 
@@ -299,8 +306,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  auto elapsed = chrono::duration_cast<chrono::seconds>(now - start_time).count();
 	  if (elapsed > timeout_seconds)
 	    {
-	      // XXX put zero-seeders in a list
-	      cerr << "  Timeout after " << timeout_seconds << " seconds" << endl;
+	      cerr << "timeout after " << timeout_seconds << " seconds" << endl;
 	      break;
 	    }
 
@@ -381,8 +387,9 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      double rate_kbps = current_rate_bps / 1024.0;
 	      cout << fixed << setprecision(2);
 	      cout << "  Peers: " << status.num_peers
-			<< " | Downloaded: " << downloaded_mb << " MB / " << target_mb << " MB"
-			<< " | Speed: " << rate_kbps << " KB/s";
+		   << " | Downloaded: " << downloaded_mb << " MB / "
+		   << target_mb << " MB"
+		   << " | Speed: " << rate_kbps << " KB/s";
 	      if (data_confirmed && ff_created)
 		cout << " | Disk: " << ff_size / (1024*1024) << " MB";
 	      if (sized_file_created)
@@ -428,7 +435,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      ofno << torrent_path << endl;
 	      ofno.flush();
 	    }
-	  return  nullopt;
+	  return nullopt;
 	}
     }
 
