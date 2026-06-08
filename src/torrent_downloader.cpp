@@ -247,20 +247,24 @@ media_downloader::download_minimal(const std::string& torrent_path,
       cout << "  target file: (" << target_mb << "/" << max_mb << ")"
 		<< "\t" << target_file_path << endl;
 
+      // Set up parameters.
       lt::add_torrent_params params = {};
       params.ti = ti;
       params.save_path = output_dir;
       params.flags = lt::torrent_flags_t{};
-      params.storage_mode = lt::storage_mode_allocate;
+      //params.storage_mode = lt::storage_mode_allocate;
+      params.storage_mode = lt::storage_mode_sparse;
+      params.flags |= lt::torrent_flags::auto_managed;
 
+      // Set up download priorities.
       vector<lt::download_priority_t> priorities;
       priorities.resize(ti->num_files(), lt::download_priority_t{0});
       priorities[static_cast<int>(largest_file_index)] = lt::download_priority_t{7};
       params.file_priorities = priorities;
 
+      // Start BTIH in session...
       lt::torrent_handle handle = session_.add_torrent(move(params));
-
-      cout << "  Waiting for metadata..." << endl;
+      cout << "starting, waiting for metadata...";
       for (int attempt = 0; attempt < 60; ++attempt)
 	{
 	  if (handle.status().has_metadata)
@@ -268,18 +272,12 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  this_thread::sleep_for(chrono::milliseconds(500));
 	  drain_alerts();
 	}
-
       if (!handle.status().has_metadata)
 	{
 	  session_.remove_torrent(handle);
 	  return nullopt;
 	}
-
-      cout << "  Metadata received, enabling sequential download..." << endl;
-      handle.set_flags(lt::torrent_flags::sequential_download);
-      handle.set_flags(lt::torrent_flags::auto_managed);
-      handle.force_reannounce();
-
+      cout << "  ...metadata received." << endl;
 
       // Start loop...
       // End when:
@@ -401,36 +399,32 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  this_thread::sleep_for(chrono::seconds(1));
 	} // while end
 
-      // Clean up
-      const bool cleanupp(true);
+      // Pause session, remove torrent.
       const double downloaded_total = handle.status().total_done;
       handle.pause();
       session_.remove_torrent(handle);
       this_thread::sleep_for(chrono::seconds(5));
 
+      // Clean up
       // Remove large file and used sized file if possible.
-      const bool use_sizedp = verify_data_on_disk(sized_file_path, target);
-      const bool use_finalp = verify_data_on_disk(final_file_path, target);
-      if (use_sizedp)
+      const bool cleanupp(true);
+      const bool exists_finalp = fs::exists(final_file_path);
+      if (cleanupp && exists_finalp)
 	{
-	  if (cleanupp && use_finalp)
-	    {
-	      error_code ec;
-	      if (!fs::remove(final_file_path, ec))
-		cout << "error: failed to replace with small file: "
-			  << ec.message() << endl;
-	    }
-	  return sized_file_path;
+	  error_code ec;
+	  if (!fs::remove(final_file_path, ec))
+	    cout << "error: failed to remove null file: "
+		 << ec.message() << endl;
 	}
+
+      const bool use_sizedp = verify_data_on_disk(sized_file_path, target);
+      if (use_sizedp)
+	return sized_file_path;
       else
 	{
 	  if (downloaded_total == 0)
-	    {
-	      ofno << torrent_path << endl;
-	      return  nullopt;
-	    }
-	  else
-	    return final_file_path;
+	    ofno << torrent_path << endl;
+	  return  nullopt;
 	}
     }
 
