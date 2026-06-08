@@ -193,6 +193,11 @@ verify_data_on_disk(const fs::path& file_path,
 }
 
 
+// Log if no peers to file.
+const std::ios_base::openmode ofm = std::ios_base::out | std::ios_base::app;
+std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
+
+
 /// Download the file given as an argument, but stop at 10MB and
 /// archive the smaller sized file.
 std::optional<fs::path>
@@ -207,10 +212,6 @@ media_downloader::download_minimal(const std::string& torrent_path,
   const string fsuffix = ".sized";
   fs::path final_file_path;
   fs::path sized_file_path;
-
-  // Log if no peers to file.
-  ios_base::openmode ofm = ios_base::out | ios_base::app;
-  ofstream ofno(output_dir + "download.suspect-or-no-peers.log", ofm);
 
   try
     {
@@ -423,7 +424,10 @@ media_downloader::download_minimal(const std::string& torrent_path,
       else
 	{
 	  if (downloaded_total == 0)
-	    ofno << torrent_path << endl;
+	    {
+	      ofno << torrent_path << endl;
+	      ofno.flush();
+	    }
 	  return  nullopt;
 	}
     }
