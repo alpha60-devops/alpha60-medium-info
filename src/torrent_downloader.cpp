@@ -112,14 +112,14 @@ copy_first_n_bytes(const fs::path& source, const fs::path& destination,
       return false;
   }
 
-  const size_t buffer_size = 1024 * 1024; // 1MB buffer
+  std::int64_t buffer_size = 1024 * 1024; // 1MB buffer
   std::vector<char> buffer(buffer_size);
   std::int64_t remaining = num_bytes;
   std::int64_t total_copied = 0;
 
   while (remaining > 0)
     {
-      size_t to_read = static_cast<size_t>(std::min(remaining, static_cast<std::int64_t>(buffer_size)));
+      size_t to_read = static_cast<size_t>(std::min(remaining, buffer_size));
       src.read(buffer.data(), to_read);
       std::streamsize bytes_read = src.gcount();
       if (bytes_read == 0)
@@ -212,7 +212,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 				   const std::string& output_dir,
 				   const std::int64_t bytes_to_download,
 				   const int timeout_seconds,
-				   const string fsuffix = ".sized")
+				   const std::string fsuffix)
 {
   // Return sized_file_path file whenever possible, as that is the small one.
   using namespace std;
@@ -297,9 +297,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
       int64_t last_downloaded = 0;
       auto last_rate_time = start_time;
       double current_rate_bps = 0.0;
-      bool data_confirmed = false;
-      bool sized_file_created = false;
-      while (session_running_ && !sized_file_created)
+      while (session_running_)
 	{
 	  // Start clock.
 	  auto now = chrono::steady_clock::now();
@@ -317,64 +315,14 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  // status.all_time_download
 	  double downloaded_mb = status.total_done / (1024.0 * 1024.0);
 	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
-	    {
-	      if (data_confirmed)
-		break;
-	      else
-		{
-		  cout << "  Flushing cache to disk..." << endl;
-
-		  // libtorrent flush
-		  handle.save_resume_data(lt::torrent_handle::save_info_dict);
-		  handle.flush_cache();
-
-		  // os flush
-		  // Get the actual file path that libtorrent is writing to
-		  // Open the file with POSIX for direct fsync
-		  int fd = open(final_file_path.string().c_str(), O_RDONLY);
-		  if (fd != -1)
-		    {
-		      cout << "  Calling fsync() on file descriptor..." << endl;
-		      if (fsync(fd) != 0)
-			cerr << "  ✗ fsync() failed: " << strerror(errno) << endl;
-		      close(fd);
-		    }
-		  else
-		    {
-		      cerr << "  ✗ Cannot open file for fsync: " << strerror(errno) << endl;
-		    }
-
-		  // Settle.
-		  this_thread::sleep_for(chrono::milliseconds(5000));
-		}
-	    }
-
-	  // Confirm data on disk.
-	  // Check actual file on disk for non-zero data
-	  const bool ff_created = fs::exists(final_file_path);
-	  const auto ff_size = ff_created ? fs::file_size(final_file_path) : 0;
-	  const bool ff_size_targetp = ff_size >= ulong(target);
-	  if (ff_created && ff_size_targetp && !data_confirmed)
-	    data_confirmed = verify_data_on_disk(final_file_path, target);
-
-	  // Create .sized file once we have enough data
-	  if (ff_size_targetp && data_confirmed && !sized_file_created)
-	  {
-	    if (copy_first_n_bytes(final_file_path, sized_file_path, target))
-	      {
-		sized_file_created = true;
-		break;
-	      }
-	    else
-	      cerr << "  ✗ Failed to create .sized file" << endl;
-	  }
+	    break;
 
 	  // Calculate current download rate
-	  auto rate_elapsed = chrono::duration_cast<chrono::seconds>(now - last_rate_time).count();
+	  double rate_elapsed = chrono::duration_cast<chrono::seconds>(now - last_rate_time).count();
 	  if (rate_elapsed >= 5 && status.total_payload_download > 0)
 	    {
-	      int64_t delta_bytes = status.total_payload_download - last_downloaded;
-	      current_rate_bps = static_cast<double>(delta_bytes) / static_cast<double>(rate_elapsed);
+	      double delta_bytes = status.total_payload_download - last_downloaded;
+	      current_rate_bps = delta_bytes / rate_elapsed;
 	      last_downloaded = status.total_payload_download;
 	      last_rate_time = now;
 	    }
@@ -388,12 +336,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      cout << fixed << setprecision(2);
 	      cout << "  Peers: " << status.num_peers
 		   << " | Downloaded: " << downloaded_mb << " MB / "
-		   << target_mb << " MB"
+		   << max_mb << " MB"
 		   << " | Speed: " << rate_kbps << " KB/s";
-	      if (data_confirmed && ff_created)
-		cout << " | Disk: " << ff_size / (1024*1024) << " MB";
-	      if (sized_file_created)
-		cout << " | .sized: ✓";
 
 	      cout << endl;
 	      last_status_time = now;
@@ -405,28 +349,83 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
 	  drain_alerts();
 	  this_thread::sleep_for(chrono::seconds(1));
-	} // while end
+	}
 
-      // Pause session, remove torrent.
+      // Tear down.
+      // Pause session, flush data, remove torrent.
       const double downloaded_total = handle.status().total_done;
       handle.pause();
+
+      // Force cache flush
+      handle.flush_cache();
+
+      // Request resume data (this also forces dirty blocks to disk)
+      handle.save_resume_data(lt::torrent_handle::save_info_dict);
+
+      // Wait for flush to complete - monitor file or wait fixed time
+      // The safe approach: wait a few seconds for async writes to complete
+      // A better approach: poll file size/verify_data_on_disk with timeout
+      const int waitmaxsec = 5;
+      bool data_written = false;
+      for (int retry = 0; retry < waitmaxsec; ++retry)
+	{
+	  if (verify_data_on_disk(final_file_path, target, 512))
+	    {
+	      data_written = true;
+	      break;
+	    }
+	  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	}
+      if (!data_written)
+	{
+	  // OS-level flush
+	  // Get the actual file path that libtorrent is writing to
+	  // Open the file with POSIX for direct fsync
+	  int fd = open(final_file_path.string().c_str(), O_RDONLY);
+	  if (fd != -1)
+	    {
+	      cout << "  Calling fsync() on file descriptor..." << endl;
+	      if (fsync(fd) != 0)
+		cerr << "  ✗ fsync() failed: " << strerror(errno) << endl;
+	      close(fd);
+	    }
+	  else
+	    cerr << "  Cannot open file for fsync: " << strerror(errno) << endl;
+	}
+
       session_.remove_torrent(handle);
       this_thread::sleep_for(chrono::seconds(5));
+
+
+      // Confirm data on disk.
+      // Check actual file on disk for non-zero data.
+      // Create a specially-sized small file for the media archive.
+      const bool ff_created = fs::exists(final_file_path);
+      const auto ff_size = ff_created ? fs::file_size(final_file_path) : 0;
+      const bool ff_size_targetp = ff_size >= ulong(target);
+      if (ff_created && ff_size_targetp)
+	{
+	  if (verify_data_on_disk(final_file_path, target))
+	    {
+	      if (!copy_first_n_bytes(final_file_path, sized_file_path, target))
+		cerr << "fail: BTIH did not create smaller sized file" << endl;
+	    }
+	  else
+	    cerr << "fail: BTIH did not serialize to disk" << endl;
+	}
+
 
       // Clean up
       // Remove large file and used sized file if possible.
       const bool cleanupp(true);
-      const bool exists_finalp = fs::exists(final_file_path);
-      if (cleanupp && exists_finalp)
+      if (cleanupp && ff_created)
 	{
 	  error_code ec;
 	  if (!fs::remove(final_file_path, ec))
-	    cout << "error: failed to remove null file: "
-		 << ec.message() << endl;
+	    cout << "error: failed to remove file: " << ec.message() << endl;
 	}
 
-      const bool use_sizedp = verify_data_on_disk(sized_file_path, target);
-      if (use_sizedp)
+      if (verify_data_on_disk(sized_file_path, target))
 	return sized_file_path;
       else
 	{
