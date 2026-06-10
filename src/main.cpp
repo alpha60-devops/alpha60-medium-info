@@ -85,7 +85,10 @@ int main(int argc, char* argv[])
 
 
   // Initialize downloader
-  cout << "\n[2/3] Downloading media metadata..." << endl;
+  //const uint mini_size = 10 * 1024 * 1024;  // 10 MB
+  const uint mini_size = 20 * 1024 * 1024;  // 10 MB
+
+  cout << "\n[2/3] Downloading media cache ..." << endl;
   media_downloader downloader;
 
   // For each torrent, download minimal media file and extract metadata
@@ -102,27 +105,28 @@ int main(int argc, char* argv[])
 
       // Check if we already have a cached download
       fs::path cached_file = torrent_cache_dir / "media_sample";
-      if (fs::exists(cached_file) && fs::file_size(cached_file) >= 10 * 1024 * 1024) {
-	cout << "    Using cached download: " << cached_file << endl;
-	downloaded_files.push_back(cached_file);
+      if (fs::exists(cached_file) && fs::file_size(cached_file) >= mini_size)
+	{
+	  cout << "    Using cached download: " << cached_file << endl;
+	  downloaded_files.push_back(cached_file);
 
-	// Extract MediaInfo from cached file
-	MediaInfoExtractor extractor(cached_file);
-	auto media_data = extractor.extract();
-
-	if (media_data.has_value()) {
-	  media_data_list.push_back(media_data.value());
-	  cout << "    ✓ Extracted metadata from cache" << endl;
-	} else {
-	  cerr << "    ✗ Failed to extract metadata from cache" << endl;
-	  media_data_list.push_back(MediaInfoData());
-	}
-	continue;
+	  // Extract MediaInfo from cached file
+	  MediaInfoExtractor extractor(cached_file);
+	  auto media_data = extractor.extract();
+	  if (media_data.has_value())
+	    {
+	      media_data_list.push_back(media_data.value());
+	      cout << "    ✓ Extracted metadata from cache" << endl;
+	    }
+	  else
+	    {
+	      cerr << "    ✗ Failed to extract metadata from cache" << endl;
+	      media_data_list.push_back(MediaInfoData());
+	    }
+	  continue;
       }
 
       // Download minimal media file
-      //const uint mini_size = 10 * 1024 * 1024;  // 10 MB
-      const uint mini_size = 20 * 1024 * 1024;  // 10 MB
       cout << "    Downloading first " << mini_size << "MB..." << endl;
       auto media_path = downloader.download_minimal(tf.torrent_path.string(),
 						    torrent_cache_dir.string(), mini_size);
@@ -167,24 +171,24 @@ int main(int argc, char* argv[])
 	  // Print brief summary of what we found
 	  const auto& md = media_data.value();
 	  cout << "    ✓ Codec: " << (md.video.codec_id.empty() ? "unknown" : md.video.codec_id);
-	  if (md.video.width > 0 && md.video.height > 0) {
+	  if (md.video.width > 0 && md.video.height > 0)
 	    cout << ", Resolution: " << md.video.width << "x" << md.video.height;
-	  }
-	  if (!md.video.frame_rate.empty()) {
+	  if (!md.video.frame_rate.empty())
 	    cout << ", FPS: " << md.video.frame_rate;
-	  }
 	  cout << endl;
-
-	} else {
-	cerr << "    ✗ Failed to extract metadata" << endl;
-	media_data_list.push_back(MediaInfoData());
-      }
+	}
+      else
+	{
+	  cerr << "    ✗ Failed to extract metadata" << endl;
+	  media_data_list.push_back(MediaInfoData());
+	}
     }
 
-  if (g_interrupted) {
-    cout << "\n! Interrupted. Cleaning up..." << endl;
-    return 130;
-  }
+  if (g_interrupted)
+    {
+      cout << "\n! Interrupted. Cleaning up..." << endl;
+      return 130;
+    }
 
   // Build enriched JSON
   cout << "\n[3/3] Building enriched JSON..." << endl;
