@@ -14,12 +14,15 @@ namespace fs = std::filesystem;
 // Global flag for interrupt handling
 std::atomic<bool> g_interrupted{false};
 
-static void signal_handler(int /*sig*/) {
+static void
+signal_handler(int /*sig*/) {
     std::cout << "\n! Interrupted by user. Cleaning up..." << std::endl;
     g_interrupted = true;
 }
 
-static void print_usage(const char* prog_name) {
+static void
+print_usage(const char* prog_name)
+{
     std::cout << "Usage: " << prog_name << " <input_directory> [output_file] [cache_dir]" << std::endl;
     std::cout << std::endl;
     std::cout << "  input_directory: Directory containing .torrent files" << std::endl;
@@ -30,7 +33,8 @@ static void print_usage(const char* prog_name) {
     std::cout << "  " << prog_name << " /path/to/torrents ./enriched.json ./cache" << std::endl;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])
+{
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
@@ -44,15 +48,15 @@ int main(int argc, char* argv[]) {
     fs::path cache_dir = (argc >= 4) ? argv[3] : "download.cache";
 
     // Validate input directory
-    if (!fs::exists(input_dir) || !fs::is_directory(input_dir)) {
+    if (!fs::exists(input_dir) || !fs::is_directory(input_dir))
+      {
 	std::cerr << "Error: Input directory does not exist: " << input_dir << std::endl;
 	return 1;
-    }
+      }
 
     // Create output directory if needed
-    if (output_file.has_parent_path()) {
-	fs::create_directories(output_file.parent_path());
-    }
+    if (output_file.has_parent_path())
+      fs::create_directories(output_file.parent_path());
 
     // Create cache directory
     fs::create_directories(cache_dir);
@@ -69,13 +73,14 @@ int main(int argc, char* argv[]) {
     std::cout << "\n[1/3] Parsing torrent files..." << std::endl;
     TorrentParser parser(input_dir);
     auto torrents = parser.parse_all_torrents();
-
-    std::cout << "Found " << torrents.size() << " torrent file(s)" << std::endl;
-
-    if (torrents.empty()) {
+    if (torrents.empty())
+      {
 	std::cerr << "Error: No .torrent files found in " << input_dir << std::endl;
 	return 1;
     }
+    else
+      std::cout << "Found " << torrents.size() << " torrent file(s)" << std::endl;
+
 
     // Initialize downloader
     std::cout << "\n[2/3] Downloading media metadata..." << std::endl;
@@ -84,8 +89,8 @@ int main(int argc, char* argv[]) {
     // For each torrent, download minimal media file and extract metadata
     std::vector<MediaInfoData> media_data_list;
     std::vector<fs::path> downloaded_files;
-
-    for (size_t i = 0; i < torrents.size() && !g_interrupted; ++i) {
+    for (size_t i = 0; i < torrents.size() && !g_interrupted; ++i)
+      {
 	const auto& tf = torrents[i];
 	std::cout << "\n  [" << (i+1) << "/" << torrents.size() << "] " << tf.name << std::endl;
 
@@ -114,14 +119,13 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Download minimal media file
-	std::cout << "    Downloading first 10MB..." << std::endl;
-	auto media_path = downloader.download_minimal(
-	    tf.torrent_path.string(),
-	    torrent_cache_dir.string(),
-	    10 * 1024 * 1024  // 10 MB
-	);
-
-	if (!media_path.has_value()) {
+	//const uint mini_size = 10 * 1024 * 1024;  // 10 MB
+	const uint mini_size = 20 * 1024 * 1024;  // 10 MB
+	std::cout << "    Downloading first " << mini_size << "MB..." << std::endl;
+	auto media_path = downloader.download_minimal(tf.torrent_path.string(),
+						      torrent_cache_dir.string(), mini_size);
+	if (!media_path.has_value())
+	  {
 	    std::cerr << "    ✗ Failed to download media file" << std::endl;
 	    media_data_list.push_back(MediaInfoData());
 	    downloaded_files.push_back("");
@@ -134,14 +138,18 @@ int main(int argc, char* argv[]) {
 
 	// Create a symlink or copy to media_sample for cache consistency
 	fs::path cache_link = torrent_cache_dir / "media_sample";
-	if (!fs::exists(cache_link)) {
-	    try {
+	if (!fs::exists(cache_link))
+	  {
+	    try
+	      {
 		fs::create_symlink(final_path, cache_link);
-	    } catch (...) {
+	      }
+	    catch (...)
+	      {
 		// Symlink failed, just use the original path
 		cache_link = final_path;
-	    }
-	}
+	      }
+	  }
 
 	downloaded_files.push_back(final_path);
 	std::cout << "    ✓ Downloaded to: " << final_path << std::endl;
@@ -150,8 +158,8 @@ int main(int argc, char* argv[]) {
 	std::cout << "    Extracting metadata..." << std::endl;
 	MediaInfoExtractor extractor(final_path);
 	auto media_data = extractor.extract();
-
-	if (media_data.has_value()) {
+	if (media_data.has_value())
+	  {
 	    media_data_list.push_back(media_data.value());
 
 	    // Print brief summary of what we found
@@ -180,21 +188,23 @@ int main(int argc, char* argv[]) {
     std::cout << "\n[3/3] Building enriched JSON..." << std::endl;
     JsonEnricher enricher;
     std::string json_output = enricher.build_output(torrents, media_data_list);
-
-    // Write output file
-    if (enricher.write_output(output_file.string(), json_output)) {
+    if (enricher.write_output(output_file.string(), json_output))
+      {
 	std::cout << "✓ Successfully wrote enriched JSON to: " << output_file << std::endl;
 
 	// Print file size
-	if (fs::exists(output_file)) {
+	if (fs::exists(output_file))
+	  {
 	    auto size = fs::file_size(output_file);
 	    std::cout << "  Output size: " << std::fixed << std::setprecision(2)
 		      << (size / 1024.0 / 1024.0) << " MB" << std::endl;
-	}
-    } else {
+	  }
+      }
+    else
+      {
 	std::cerr << "✗ Error: Failed to write output file" << std::endl;
 	return 1;
-    }
+      }
 
     std::cout << "\n========================================" << std::endl;
     std::cout << "  Pipeline completed successfully!" << std::endl;
