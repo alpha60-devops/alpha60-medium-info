@@ -85,8 +85,8 @@ int main(int argc, char* argv[])
 
 
   // Initialize downloader
-  //const uint mini_size = 10 * 1024 * 1024;  // 10 MB
-  const uint mini_size = 20 * 1024 * 1024;  // 10 MB
+  const uint mini_size = 10 * 1024 * 1024;  // 10 MB
+  //const uint mini_size = 20 * 1024 * 1024;  // 10 MB
 
   cout << "\n[2/3] Downloading media cache ..." << endl;
   media_downloader downloader;

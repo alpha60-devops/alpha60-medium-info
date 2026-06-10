@@ -353,7 +353,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
       // Tear down.
       // Pause session, flush data, remove torrent.
-      const double downloaded_total = handle.status().total_done;
+      const double downloaded = handle.status().total_done;
       handle.pause();
 
       // Force cache flush
@@ -362,35 +362,39 @@ media_downloader::download_minimal(const std::string& torrent_path,
       // Request resume data (this also forces dirty blocks to disk)
       handle.save_resume_data(lt::torrent_handle::save_info_dict);
 
-      // Wait for flush to complete - monitor file or wait fixed time
-      // The safe approach: wait a few seconds for async writes to complete
-      // A better approach: poll file size/verify_data_on_disk with timeout
-      const int waitmaxsec = 5;
-      bool data_written = false;
-      for (int retry = 0; retry < waitmaxsec; ++retry)
+      // If bytes were downloaded, now write to disk. If not, skip.
+      if (downloaded)
 	{
-	  if (verify_data_on_disk(final_file_path, target, 512))
+	  // Wait for flush to complete - monitor file or wait fixed time
+	  // The safe approach: wait a few seconds for async writes to complete
+	  // A better approach: poll file size/verify_data_on_disk with timeout
+	  const int waitmaxsec = 5;
+	  bool data_written = false;
+	  for (int retry = 0; retry < waitmaxsec; ++retry)
 	    {
-	      data_written = true;
-	      break;
+	      if (verify_data_on_disk(final_file_path, target, 512))
+		{
+		  data_written = true;
+		  break;
+		}
+	      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 	    }
-	  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	}
-      if (!data_written)
-	{
-	  // OS-level flush
-	  // Get the actual file path that libtorrent is writing to
-	  // Open the file with POSIX for direct fsync
-	  int fd = open(final_file_path.string().c_str(), O_RDONLY);
-	  if (fd != -1)
+	  if (!data_written)
 	    {
-	      cout << "  Calling fsync() on file descriptor..." << endl;
-	      if (fsync(fd) != 0)
-		cerr << "  ✗ fsync() failed: " << strerror(errno) << endl;
-	      close(fd);
+	      // OS-level flush
+	      // Get the actual file path that libtorrent is writing to
+	      // Open the file with POSIX for direct fsync
+	      int fd = open(final_file_path.string().c_str(), O_RDONLY);
+	      if (fd != -1)
+		{
+		  cout << "  Calling fsync() on file descriptor..." << endl;
+		  if (fsync(fd) != 0)
+		    cerr << "  ✗ fsync() failed: " << strerror(errno) << endl;
+		  close(fd);
+		}
+	      else
+		cerr << "  Cannot open file for fsync: " << strerror(errno) << endl;
 	    }
-	  else
-	    cerr << "  Cannot open file for fsync: " << strerror(errno) << endl;
 	}
 
       session_.remove_torrent(handle);
@@ -429,7 +433,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	return sized_file_path;
       else
 	{
-	  if (downloaded_total == 0)
+	  if (downloaded == 0)
 	    {
 	      ofno << torrent_path << endl;
 	      ofno.flush();
