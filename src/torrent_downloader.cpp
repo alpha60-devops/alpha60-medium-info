@@ -385,7 +385,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  // Wait for flush to complete - monitor file or wait fixed time
 	  // The safe approach: wait a few seconds for async writes to complete
 	  // A better approach: poll file size/verify_data_on_disk with timeout
-	  const int waitmaxsec = 5;
+	  const int waitmaxsec = 8;
 	  bool data_written = false;
 	  for (int retry = 0; retry < waitmaxsec; ++retry)
 	    {
@@ -406,11 +406,11 @@ media_downloader::download_minimal(const std::string& torrent_path,
 		{
 		  cout << "  Calling fsync() on file descriptor..." << endl;
 		  if (fsync(fd) != 0)
-		    cerr << "  ✗ fsync() failed: " << strerror(errno) << endl;
+		    cerr << "  ..fsync() failed: " << strerror(errno) << endl;
 		  close(fd);
 		}
 	      else
-		cerr << "  Cannot open file for fsync: " << strerror(errno) << endl;
+		cerr << "  Invalid file for fsync: " << strerror(errno) << endl;
 	    }
 	}
 
