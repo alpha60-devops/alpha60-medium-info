@@ -66,8 +66,8 @@ struct download_result
 
 download_result
 download_torrent_media(const TorrentFile& tf,
-                       const fs::path& cache_dir,
-                       size_t mini_size)
+		       const fs::path& cache_dir,
+		       size_t mini_size)
 {
   download_result result;
   result.success = false;
@@ -89,8 +89,8 @@ download_torrent_media(const TorrentFile& tf,
   cout << "    Downloading first " << mini_size << "MB..." << endl;
   media_downloader downloader;
   auto media_path = downloader.download_minimal(tf.torrent_path.string(),
-                                                torrent_cache_dir.string(),
-                                                mini_size);
+						torrent_cache_dir.string(),
+						mini_size);
 
   if (!media_path.has_value()) {
     result.error_msg = "Failed to download media file";
@@ -161,17 +161,17 @@ extract_media_info(const fs::path& media_path)
 // ============================================================
 struct process_result
 {
-  vector<MediaInfoData> media_data_list;
-  vector<fs::path> downloaded_files;
-  size_t success_count;
-  size_t fail_count;
+  vector<MediaInfoData>		media_data_list;
+  vector<fs::path>		downloaded_files;
+  size_t			success_count;
+  size_t			fail_count;
 };
 
 process_result
 process_all_torrents(const vector<TorrentFile>& torrents,
-                     const fs::path& cache_dir,
-                     size_t mini_size,
-                     bool download_p = true)
+		     const fs::path& cache_dir,
+		     const size_t mini_size,
+		     const bool download_p)
 {
   process_result result;
   result.success_count = 0;
@@ -195,12 +195,12 @@ process_all_torrents(const vector<TorrentFile>& torrents,
       cout << "    Extracting metadata..." << endl;
       auto extract_result = extract_media_info(cached_file);
       if (extract_result.success) {
-        result.media_data_list.push_back(extract_result.data);
-        result.success_count++;
+	result.media_data_list.push_back(extract_result.data);
+	result.success_count++;
       } else {
-        cerr << "    ✗ " << extract_result.error_msg << endl;
-        result.media_data_list.push_back(MediaInfoData());
-        result.fail_count++;
+	cerr << "    ✗ " << extract_result.error_msg << endl;
+	result.media_data_list.push_back(MediaInfoData());
+	result.fail_count++;
       }
       continue;
     }
@@ -249,9 +249,9 @@ process_all_torrents(const vector<TorrentFile>& torrents,
 // ============================================================
 bool
 write_enriched_output(const fs::path& output_file,
-                      const vector<TorrentFile>& torrents,
-                      const vector<MediaInfoData>& media_data_list,
-                      size_t mini_size)
+		      const vector<TorrentFile>& torrents,
+		      const vector<MediaInfoData>& media_data_list,
+		      size_t mini_size)
 {
   cout << "\n[3/3] Building enriched JSON..." << endl;
 
@@ -268,7 +268,7 @@ write_enriched_output(const fs::path& output_file,
   if (fs::exists(output_file)) {
     auto size = fs::file_size(output_file);
     cout << "  Output size: " << fixed << setprecision(2)
-         << (size / 1024.0 / 1024.0) << " MB" << endl;
+	 << (size / 1024.0 / 1024.0) << " MB" << endl;
   }
 
   return true;
@@ -339,8 +339,9 @@ int main(int argc, char* argv[])
   }
 
   // Step 2: Process all torrents (download + extract)
-  const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
-  bool download_p = true;  // Set to false to skip downloads, use cache only
+  //const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
+  const size_t mini_size = 10 * 1024 * 1024;  // 10 MB
+  bool download_p = false;
   auto process_result = process_all_torrents(torrents, cache_dir, mini_size, download_p);
 
   // Check for interrupt
