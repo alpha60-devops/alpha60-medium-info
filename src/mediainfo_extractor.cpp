@@ -66,22 +66,27 @@ std::string MediaInfoExtractor::exec_mediainfo() {
     return result;
 }
 
-std::string MediaInfoExtractor::exec_ffprobe() {
-    std::string cmd = "ffprobe -v quiet -print_format json -show_streams \"" + media_file_.string() + "\" 2>/dev/null";
-    std::array<char, 256> buffer;
-    std::string result;
+std::string
+MediaInfoExtractor::exec_ffprobe()
+{
+  std::string ffcmd = "ffprobe -v quiet -print_format json -show_streams -analyzeduration 10M -probesize 10M ";
+  std::string cmd = ffcmd + "\"" + media_file_.string() + "\" 2>/dev/null";
+  std::array<char, 256> buffer;
+  std::string result;
 
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-	std::cerr << "  [FFprobe] Failed to execute ffprobe" << std::endl;
-	return "";
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe)
+    {
+      std::cerr << "  [FFprobe] Failed to execute ffprobe" << std::endl;
+      return result;
     }
-    std::unique_ptr<FILE, PcloseDeleter> pipe_ptr(pipe);
+  std::unique_ptr<FILE, PcloseDeleter> pipe_ptr(pipe);
 
-    while (fgets(buffer.data(), buffer.size(), pipe_ptr.get()) != nullptr) {
-	result += buffer.data();
+  while (fgets(buffer.data(), buffer.size(), pipe_ptr.get()) != nullptr)
+    {
+      result += buffer.data();
     }
-    return result;
+  return result;
 }
 
 bool MediaInfoExtractor::parse_ffprobe_output(const std::string& json_output, MediaInfoData& data) {

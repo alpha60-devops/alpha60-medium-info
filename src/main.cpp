@@ -85,7 +85,9 @@ int main(int argc, char* argv[])
 
 
   // Initialize downloader
-  const uint mini_size = 10 * 1024 * 1024;  // 10 MB
+  // For libtorrent, 4 MiB (minimum), but may require up to 4-16 pieces
+  // For mediainfo, 10MB may be sufficient if the video key frames are in the right place
+  const uint mini_size = 16 * 1024 * 1024;  // 10 MB
   //const uint mini_size = 20 * 1024 * 1024;  // 10 MB
 
   cout << "\n[2/3] Downloading media cache ..." << endl;
