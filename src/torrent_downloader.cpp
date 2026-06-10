@@ -319,8 +319,9 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  // Check if the download has reached the target size.
 	  // status.total_payload_download
 	  // status.all_time_download
-	  double downloaded_mb = status.total_done / (1024.0 * 1024.0);
-	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
+	  const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
+	  const double xtra_mb = 10; // Stop slightly after total.
+	  if ((downloaded_mb >= target_mb + xtra_mb || downloaded_mb >= max_mb))
 	    break;
 
 	  // Calculate current download rate

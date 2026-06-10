@@ -37,7 +37,7 @@ public:
   download_minimal(const std::string& torrent_path,
 		   const std::string& output_dir,
 		   const std::int64_t bytes_to_download = 10 * 1024 * 1024,
-		   const int timeout_seconds = 300,
+		   const int timeout_seconds = 60,
 		   const std::string fsuffix = ".sized");
 
 private:
