@@ -14,14 +14,18 @@
 
 namespace fs = std::filesystem;
 
-class JsonEnricher {
+class JsonEnricher
+{
 public:
     JsonEnricher();
     
-    std::string build_output(const std::vector<TorrentFile>& torrents,
-                             const std::vector<MediaInfoData>& media_data);
+    std::string
+    build_output(const std::vector<TorrentFile>& torrents,
+		 const std::vector<MediaInfoData>& media_data,
+		 const uint mini_size);
     
-    bool write_output(const std::string& output_path, const std::string& json_content);
+    bool
+    write_output(const std::string& output_path, const std::string& json_content);
     
 private:
     std::string json_string(const std::string& str);

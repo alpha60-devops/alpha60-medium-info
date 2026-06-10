@@ -193,7 +193,7 @@ int main(int argc, char* argv[])
   // Build enriched JSON
   cout << "\n[3/3] Building enriched JSON..." << endl;
   JsonEnricher enricher;
-  string json_output = enricher.build_output(torrents, media_data_list);
+  string json_output = enricher.build_output(torrents, media_data_list, mini_size);
   if (enricher.write_output(output_file.string(), json_output))
     {
       cout << "✓ Successfully wrote enriched JSON to: " << output_file << endl;

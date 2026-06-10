@@ -2,9 +2,12 @@
 
 JsonEnricher::JsonEnricher() {}
 
-std::string JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
-					const std::vector<MediaInfoData>& media_data) {
-    std::stringstream ss;
+std::string
+JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
+			   const std::vector<MediaInfoData>& media_data,
+			   const uint mini_size)
+{
+  std::stringstream ss;
 
     // Get current UTC time
     auto now = std::time(nullptr);
@@ -12,9 +15,10 @@ std::string JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
     time_ss << std::put_time(std::gmtime(&now), "%Y-%m-%dT%H:%M:%SZ");
 
     ss << "{\n";
-    ss << "  \"api_version\": \"1.0\",\n";
-    ss << "  \"generated_at\": \"" << time_ss.str() << "\",\n";
-    ss << "  \"total_objects\": " << torrents.size() << ",\n";
+    ss << "  \"api_version\": \"1.3\",\n";
+    ss << "  \"datestamp\": \"" << time_ss.str() << "\",\n";
+    ss << "  \"btiha_size\": " << torrents.size() << ",\n";
+    ss << "  \"media_file_cache_size\": " << mini_size << ",\n";
     ss << "  \"media_objects\": [\n";
 
     for (size_t i = 0; i < torrents.size(); ++i) {
