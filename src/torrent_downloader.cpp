@@ -222,6 +222,10 @@ media_downloader::download_minimal(const std::string& torrent_path,
   fs::path final_file_path;
   fs::path sized_file_path;
 
+  // Amount of time before downloading is considered futile.
+  // This could be for a number of factors: no peers, private, unreachable.
+  const uint unresponsive_seconds(30);
+
   try
     {
       fs::create_directories(output_dir);
@@ -306,6 +310,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	{
 	  // Start clock.
 	  auto now = chrono::steady_clock::now();
+
+	  // Check for timeout.
 	  auto elapsed = to_seconds(now - start_time).count();
 	  if (elapsed > timeout_seconds)
 	    {
@@ -322,6 +328,10 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
 	  const double xtra_mb = 10; // Stop slightly after total.
 	  if ((downloaded_mb >= target_mb + xtra_mb || downloaded_mb >= max_mb))
+	    break;
+
+	  // Check if stalled.
+	  if (downloaded_mb == 0 && elapsed > unresponsive_seconds)
 	    break;
 
 	  // Calculate current download rate
