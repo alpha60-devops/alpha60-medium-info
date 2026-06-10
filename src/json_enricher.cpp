@@ -2,12 +2,82 @@
 
 JsonEnricher::JsonEnricher() {}
 
+pipeline_metrics
+JsonEnricher::compute_pipeline_metrics(const std::vector<fs::path>& downloaded_files,
+				       const std::vector<MediaInfoData>& media_data,
+				       size_t mini_size)
+{
+    pipeline_metrics metrics;
+    metrics.media_cache_file_size = mini_size;
+    metrics.btiha_size = downloaded_files.size();
+
+    for (size_t i = 0; i < downloaded_files.size(); ++i) {
+	const auto& path = downloaded_files[i];
+	const auto& md = (i < media_data.size()) ? media_data[i] : MediaInfoData();
+
+	// Check if file exists and has size
+	bool file_exists = !path.empty() && fs::exists(path);
+	uintmax_t file_size = file_exists ? fs::file_size(path) : 0;
+
+	if (file_size == 0) {
+	    metrics.btiha_unreachable_size++;
+	    continue;
+	}
+
+	// Check if extraction produced any usable metadata
+	bool has_metadata = false;
+
+	// Video metadata
+	if (!md.video.codec_id.empty() ||
+	    md.video.width > 0 ||
+	    md.video.height > 0 ||
+	    !md.video.frame_rate.empty()) {
+	    has_metadata = true;
+	}
+
+	// Audio metadata
+	if (!md.audio.codec.empty() ||
+	    md.audio.bitrate > 0 ||
+	    md.audio.sampling_rate > 0) {
+	    has_metadata = true;
+	}
+
+	// Format metadata
+	if (md.duration > 0 ||
+	    md.file_size > 0 ||
+	    !md.audio.languages.empty()) {
+	    has_metadata = true;
+	}
+
+	if (has_metadata) {
+	    metrics.btiha_extracted_size++;
+	} else {
+	    metrics.btiha_partial_size++;
+	}
+    }
+
+    // Calculate percentage
+    if (metrics.btiha_size > 0) {
+	metrics.btiha_extracted_percent =
+	    (metrics.btiha_extracted_size * 100.0) / metrics.btiha_size;
+    }
+
+    return metrics;
+}
+
 std::string
 JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
 			   const std::vector<MediaInfoData>& media_data,
-			   const uint mini_size)
+			   const std::vector<fs::path>& downloaded_files,
+			   const std::string& collection_key,
+			   const uint mini_size,
+			   uintmax_t cache_dir_size_mb,
+			   uintmax_t torrent_total_size_mb)
 {
-  std::stringstream ss;
+    // Compute pipeline metrics
+    pipeline_metrics metrics = compute_pipeline_metrics(downloaded_files, media_data, mini_size);
+
+    std::stringstream ss;
 
     // Get current UTC time
     auto now = std::time(nullptr);
@@ -15,10 +85,19 @@ JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
     time_ss << std::put_time(std::gmtime(&now), "%Y-%m-%dT%H:%M:%SZ");
 
     ss << "{\n";
-    ss << "  \"api_version\": \"1.3\",\n";
+    ss << "  \"api_version\": \"1.4\",\n";
     ss << "  \"datestamp\": \"" << time_ss.str() << "\",\n";
-    ss << "  \"btiha_size\": " << torrents.size() << ",\n";
-    ss << "  \"media_file_cache_size\": " << mini_size << ",\n";
+    ss << "  \"collection_key\": \"" << escape_json_string(collection_key) << "\",\n";
+    ss << "  \"collection_media_cache_size_mb\": " << cache_dir_size_mb << ",\n";
+    ss << "  \"collection_media_size_mb\": " << torrent_total_size_mb << ",\n";
+    ss << "  \"pipeline_metrics\": {\n";
+    ss << "    \"btiha_size\": " << metrics.btiha_size << ",\n";
+    ss << "    \"media_cache_file_size\": " << metrics.media_cache_file_size << ",\n";
+    ss << "    \"btiha_unreachable_size\": " << metrics.btiha_unreachable_size << ",\n";
+    ss << "    \"btiha_partial_size\": " << metrics.btiha_partial_size << ",\n";
+    ss << "    \"btiha_extracted_size\": " << metrics.btiha_extracted_size << ",\n";
+    ss << "    \"btiha_extracted_percent\": " << std::fixed << std::setprecision(2) << metrics.btiha_extracted_percent << "\n";
+    ss << "  },\n";
     ss << "  \"media_objects\": [\n";
 
     for (size_t i = 0; i < torrents.size(); ++i) {
@@ -70,7 +149,7 @@ JsonEnricher::build_output(const std::vector<TorrentFile>& torrents,
 	ss << "        \"audio_channels\": " << json_string(md.audio.channels) << ",\n";
 	ss << "        \"audio_bit_depth\": " << (md.audio.bit_depth > 0 ? std::to_string(md.audio.bit_depth) : "null") << ",\n";
 
-	// Audio languages array (Reintroduced for FFprobe deductions)
+	// Audio languages array
 	ss << "        \"audio_languages\": [";
 	for (size_t j = 0; j < md.audio.languages.size(); ++j) {
 	    if (j > 0) ss << ", ";

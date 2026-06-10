@@ -14,20 +14,38 @@
 
 namespace fs = std::filesystem;
 
+struct pipeline_metrics {
+    size_t btiha_size = 0;              // total number of torrents processed
+    size_t media_cache_file_size = 0;   // size of each cache chunk in bytes
+    size_t btiha_unreachable_size = 0;  // file_size == 0
+    size_t btiha_partial_size = 0;      // file_size > 0 but no metadata extracted
+    size_t btiha_extracted_size = 0;    // at least one metadata field extracted
+    double btiha_extracted_percent = 0.0;
+};
+
 class JsonEnricher
 {
 public:
     JsonEnricher();
-    
+
     std::string
     build_output(const std::vector<TorrentFile>& torrents,
 		 const std::vector<MediaInfoData>& media_data,
-		 const uint mini_size);
-    
+		 const std::vector<fs::path>& downloaded_files,
+		 const std::string& collection_key,
+		 const uint mini_size,
+		 uintmax_t cache_dir_size_mb,
+		 uintmax_t torrent_total_size_mb);
+
     bool
     write_output(const std::string& output_path, const std::string& json_content);
-    
+
 private:
+    pipeline_metrics
+    compute_pipeline_metrics(const std::vector<fs::path>& downloaded_files,
+			     const std::vector<MediaInfoData>& media_data,
+			     size_t mini_size);
+
     std::string json_string(const std::string& str);
     std::string escape_json_string(const std::string& str);
 };
