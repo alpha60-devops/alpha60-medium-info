@@ -326,7 +326,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  // status.total_payload_download
 	  // status.all_time_download
 	  const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
-	  const double xtra_mb = 10; // Stop slightly after total.
+	  const double xtra_mb = 5; // Stop slightly after total.
 	  if ((downloaded_mb >= target_mb + xtra_mb || downloaded_mb >= max_mb))
 	    break;
 
