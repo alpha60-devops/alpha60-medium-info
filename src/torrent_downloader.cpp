@@ -198,12 +198,14 @@ const std::ios_base::openmode ofm = std::ios_base::out | std::ios_base::app;
 std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
 
 
-/// Download a minimum-sized chunk of the largest media file so that mediainfo can
-/// be used to determine the frame rate, frame size, audio and
-/// subtitles.
+/// Download a minimum-sized chunk of the largest media file so that
+/// mediainfo can be used to determine the frame rate, frame size,
+/// audio and subtitles.
 ///
-/// Download the largest file in the @parm torrent_path given as an argument,
-/// but stop at 10MB (or @param bytes_to_download) and archive the smaller sized file.
+/// Download the largest file in the @parm torrent_path given as an
+/// argument, but stop at 10MB (or @param bytes_to_download) and
+/// archive the smaller sized file.
+///
 /// @param timeout_seconds the number of seconds to loop while wating for data.
 /// @param output_dir result files
 /// @param fsuffix the suffix used on the minimal media file
@@ -294,6 +296,9 @@ media_downloader::download_minimal(const std::string& torrent_path,
       auto start_time = chrono::steady_clock::now();
       auto last_status_time = start_time;
 
+      auto to_seconds = [](auto duration)
+      { return std::chrono::duration_cast<std::chrono::seconds>(duration); };
+
       int64_t last_downloaded = 0;
       auto last_rate_time = start_time;
       double current_rate_bps = 0.0;
@@ -301,7 +306,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	{
 	  // Start clock.
 	  auto now = chrono::steady_clock::now();
-	  auto elapsed = chrono::duration_cast<chrono::seconds>(now - start_time).count();
+	  auto elapsed = to_seconds(now - start_time).count();
 	  if (elapsed > timeout_seconds)
 	    {
 	      cerr << "timeout after " << timeout_seconds << " seconds" << endl;
@@ -309,16 +314,17 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	    }
 
 	  // Get status.
-	  // Check if we've reached the target
 	  auto status = handle.status();
-	  //double downloaded_mb = status.total_payload_download / (1024.0 * 1024.0);
+
+	  // Check if the download has reached the target size.
+	  // status.total_payload_download
 	  // status.all_time_download
 	  double downloaded_mb = status.total_done / (1024.0 * 1024.0);
 	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
 	    break;
 
 	  // Calculate current download rate
-	  double rate_elapsed = chrono::duration_cast<chrono::seconds>(now - last_rate_time).count();
+	  double rate_elapsed = to_seconds(now - last_rate_time).count();
 	  if (rate_elapsed >= 5 && status.total_payload_download > 0)
 	    {
 	      double delta_bytes = status.total_payload_download - last_downloaded;
@@ -362,7 +368,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
       // Request resume data (this also forces dirty blocks to disk)
       handle.save_resume_data(lt::torrent_handle::save_info_dict);
 
-      // If bytes were downloaded, now write to disk. If not, skip.
+      // If bytes were downloaded, wait for write to disk. If not, skip.
       if (downloaded)
 	{
 	  // Wait for flush to complete - monitor file or wait fixed time
