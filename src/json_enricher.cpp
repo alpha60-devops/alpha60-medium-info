@@ -87,7 +87,7 @@ enrichment::build_output(const std::vector<TorrentFile>& torrents,
   ss << "  \"collection_media_size_mb\": " << torrent_total_size_mb << ",\n";
   ss << "  \"pipeline_metrics\": {\n";
   ss << "    \"btiha_size\": " << metrics.btiha_size << ",\n";
-  ss << "    \"media_cache_file_size\": " << metrics.media_cache_file_size << ",\n";
+  ss << "    \"media_cache_file_size_mb\": " << metrics.media_cache_file_size / (1024*1024) << ",\n";
   ss << "    \"btiha_unreachable_size\": " << metrics.btiha_unreachable_size << ",\n";
   ss << "    \"btiha_partial_size\": " << metrics.btiha_partial_size << ",\n";
   ss << "    \"btiha_extracted_size\": " << metrics.btiha_extracted_size << ",\n";
