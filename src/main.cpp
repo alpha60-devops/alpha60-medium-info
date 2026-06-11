@@ -424,9 +424,9 @@ int main(int argc, char* argv[])
   double torrent_total_size_mb = get_collection_size_mb(torrents);
 
   // Step 2: Process all torrents (download + extract)
-  //const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
-  const size_t mini_size = 10 * 1024 * 1024;  // 10 MB
-  bool download_p = false;
+  const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
+  //const size_t mini_size = 10 * 1024 * 1024;  // 10 MB
+  bool download_p = true;
   auto process_result = process_all_torrents(torrents, cache_dir,
 					     mini_size, download_p);
 
