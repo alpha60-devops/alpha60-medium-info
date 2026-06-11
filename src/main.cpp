@@ -53,15 +53,38 @@ get_directory_size_mb(const fs::path& path)
   if (!fs::exists(path))
     throw std::runtime_error("Path does not exist: " + path.string());
 
-  // Follow symlinks by using canonical path
+  // Resolve top-level symlink if present
   fs::path target = fs::is_symlink(path) ? fs::canonical(path) : path;
   if (!fs::is_directory(target))
     throw std::runtime_error("Path is not a directory: " + target.string());
 
   std::uintmax_t total_bytes = 0;
-  for (const auto& entry : fs::recursive_directory_iterator(target))
-    if (fs::is_regular_file(entry.path()))
-      total_bytes += fs::file_size(entry.path());
+  std::unordered_set<fs::path> unique_files;  // stores canonical paths
+
+  // Recursively iterate, following directory symlinks (optional, but safe)
+  for (const auto& entry : fs::recursive_directory_iterator(target, fs::directory_options::follow_directory_symlink))
+    {
+      if (!fs::is_regular_file(entry.status()))   // check actual file type, not symlink
+	continue;
+
+      fs::path canonical_path;
+      try
+	{
+	  // Resolve any symlink to the real file
+	  canonical_path = fs::canonical(entry.path());
+	}
+      catch (const fs::filesystem_error&)
+	{
+	  // If canonical fails (e.g., broken symlink), skip this entry
+	  continue;
+	}
+
+      // Only count the file once, even if multiple links point to it
+      if (unique_files.insert(canonical_path).second)
+	{
+	  total_bytes += fs::file_size(canonical_path);
+	}
+    }
 
   // Convert to MB (1 MB = 1,048,576 bytes)
   return static_cast<double>(total_bytes) / (1024.0 * 1024.0);

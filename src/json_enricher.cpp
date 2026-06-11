@@ -73,13 +73,12 @@ enrichment::build_output(const std::vector<TorrentFile>& torrents,
   // Compute pipeline metrics
   pipeline_metrics metrics = compute_pipeline_metrics(downloaded_files, media_data, mini_size);
 
-  std::stringstream ss;
-
   // Get current UTC time
   auto now = std::time(nullptr);
   std::stringstream time_ss;
   time_ss << std::put_time(std::gmtime(&now), "%Y-%m-%dT%H:%M:%SZ");
 
+  std::stringstream ss;
   ss << "{\n";
   ss << "  \"api_version\": \"1.4\",\n";
   ss << "  \"datestamp\": \"" << time_ss.str() << "\",\n";
@@ -104,7 +103,7 @@ enrichment::build_output(const std::vector<TorrentFile>& torrents,
     ss << "    {\n";
     ss << "      \"btih\": \"" << escape_json_string(tf.btih) << "\",\n";
     ss << "      \"name\": \"" << escape_json_string(tf.name) << "\",\n";
-    ss << "      \"technical_metadata\": {\n";
+    ss << "      \"metadata\": {\n";
 
     // Originating source fields
     ss << "        \"originating_source_medium_id\": "
@@ -128,7 +127,6 @@ enrichment::build_output(const std::vector<TorrentFile>& torrents,
     ss << "        \"owner\": " << json_string(md.owner) << ",\n";
     ss << "        \"country\": " << json_string(md.country) << ",\n";
     ss << "        \"comment\": " << json_string(md.comment) << ",\n";
-    ss << "        \"language\": " << json_string(md.language) << ",\n";
 
     // Video fields
     ss << "        \"video_codec_id\": " << json_string(md.video.codec_id) << ",\n";
