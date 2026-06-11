@@ -3,9 +3,9 @@
 ## Intro
 
 Welcome to the documentation for the **Swarm Media Probe**. This tool is a designed to be used with a specific workflow that takes as input a collection of hashes for media files (BitTorrent .torrent file BTIH), downloads a minimal portion of their
-associated media content, extracts a minimal sample, and uses that media sample to derive technical metadata about video, audio, subtitles that are present (using ffprobe and mediainfo), and outputs a structured JSON report.
+associated media content, extracts a minimal sample, and uses that media sample to derive technical metadata about video, audio, subtitles that are present (using ffprobe and mediainfo), and outputs a structured JSON data file.
 
-These probe runs can build on results from previous probes,  filling in more complete data over time with longer timeouts, or requesting larger sample sizes for the existing cache.
+These probe runs can build on results from previous probes,  filling in more complete data over time with longer timeouts, or requesting larger sample sizes for the existing cache. The generated cache files can be archived for future re-analysis. The workflow permits running the probe without any downloading, as an analysis-only pass for generating structured JSON.
 
 This report file can be saved, analyzed and compared to other input collections over time.
 
