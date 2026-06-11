@@ -5,7 +5,7 @@
 Welcome to the documentation for the **Swarm Media Probe**. This tool is a designed to be used with a specific workflow that takes as input a collection of hashes for media files (BitTorrent .torrent file BTIH), downloads a minimal portion of their
 associated media content, extracts a minimal sample, and uses that media sample to derive technical metadata about video, audio, subtitles that are present (using ffprobe and mediainfo), and outputs a structured JSON report.
 
-These probes can build on previous probe data, filling in or requesting larger sample sizes for the existin cache.
+These probe runs can build on results from previous probes,  filling in more complete data over time with longer timeouts, or requesting larger sample sizes for the existing cache.
 
 This report file can be saved, analyzed and compared to other input collections over time.
 
@@ -20,7 +20,7 @@ Naturally, we call it this whole workflow by the acryonym SMiP. Use like: take a
 ## Quick Start (tl;dr)
 
 #### Build the project
-cd alpha60-searm-media-probe
+cd alpha60-swarm-media-probe
 mkdir build && cd build
 cmake .. && make -j$(nproc)
 
