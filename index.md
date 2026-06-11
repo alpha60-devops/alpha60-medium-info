@@ -2,12 +2,14 @@
 
 ## Intro
 
-Welcome to the documentation for the **Swarm Media Probe**. This tool is a batch processing system that parses
-BitTorrent .torrent files, downloads a minimal portion of their
-associated media content, extracts detailed technical metadata using
-mediainfo, and outputs a structured JSON report.
+Welcome to the documentation for the **Swarm Media Probe**. This tool is a designed to be used with a specific workflow that takes as input a collection of hashes for media files (BitTorrent .torrent file BTIH), downloads a minimal portion of their
+associated media content, extracts a minimal sample, and uses that media sample to derive technical metadata about video, audio, subtitles that are present (using ffprobe and mediainfo), and outputs a structured JSON report.
 
-Naturally, we call it SMiP. Use like: take a sip of the smip!
+These probes can build on previous probe data, filling in or requesting larger sample sizes for the existin cache.
+
+This report file can be saved, analyzed and compared to other input collections over time.
+
+Naturally, we call it this whole workflow by the acryonym SMiP. Use like: take a sip of the smip!
 
 ## Documentation Sections
 
