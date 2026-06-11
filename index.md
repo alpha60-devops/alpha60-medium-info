@@ -1,14 +1,13 @@
-# Alpha60 Swarm Medium Enrichment Pipeline Documentation
+# Alpha60 Swarm Media Probe Documentation
 
 ## Intro
 
-Welcome to the documentation for the **Swarm Medium Info Probing
-Pipeline**. This tool is a batch processing system that parses
+Welcome to the documentation for the **Swarm Media Probe**. This tool is a batch processing system that parses
 BitTorrent .torrent files, downloads a minimal portion of their
 associated media content, extracts detailed technical metadata using
 mediainfo, and outputs a structured JSON report.
 
-Naturally, we call it SMIPP. Use like: take a sip of the smipp!
+Naturally, we call it SMiP. Use like: take a sip of the smip!
 
 ## Documentation Sections
 
@@ -19,14 +18,13 @@ Naturally, we call it SMIPP. Use like: take a sip of the smipp!
 ## Quick Start (tl;dr)
 
 #### Build the project
-cd alpha60-medium-info
+cd alpha60-searm-media-probe
 mkdir build && cd build
 cmake .. && make -j$(nproc)
 
 #### Run the pipeline
 ./media_enrichment /path/to/torrent/dir ./output.json ./cache_dir
 
-## Key Features
 
 - Minimal Downloading: Only downloads the first 10MB of the media file—enough to extract all technical metadata.
 - Persistent Cache: Stores downloaded partial files to avoid re-downloading on subsequent runs.
