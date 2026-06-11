@@ -14,19 +14,20 @@
 
 namespace fs = std::filesystem;
 
-struct pipeline_metrics {
-    size_t btiha_size = 0;              // total number of torrents processed
-    size_t media_cache_file_size = 0;   // size of each cache chunk in bytes
-    size_t btiha_unreachable_size = 0;  // file_size == 0
-    size_t btiha_partial_size = 0;      // file_size > 0 but no metadata extracted
-    size_t btiha_extracted_size = 0;    // at least one metadata field extracted
-    double btiha_extracted_percent = 0.0;
+struct pipeline_metrics
+{
+  size_t btiha_size = 0;              // total number of torrents processed
+  size_t media_cache_file_size = 0;   // size of each cached file in bytes
+  size_t btiha_unreachable_size = 0;  // cache file_size == 0
+  size_t btiha_partial_size = 0;      // cache file_size > 0, but incomplete
+  size_t btiha_extracted_size = 0;    // basic video/audio metadata confirmed
+  double btiha_extracted_percent = 0.0;
 };
 
-class JsonEnricher
+class enrichment
 {
 public:
-    JsonEnricher();
+    enrichment();
 
     std::string
     build_output(const std::vector<TorrentFile>& torrents,

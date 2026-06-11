@@ -35,51 +35,42 @@ print_usage(const char* prog_name)
   cout << "  " << prog_name << " /path/to/collection-torrents-dir ./enriched.json ./cache" << endl;
 }
 
-// Helper to get first JSON file's collection_key
+
+/// Helper to get collection_key.
+/// NB this is the filesystem key id used for all Alpha60 workflows.
+/// Usually this would be computed per the member a60::collection.collection_key
+/// @param input_dir is the input directory containing torrent files
+/// Use an operational trick, where the input data director is collection_key.
 std::string
 get_collection_key(const fs::path& input_dir)
-{
-  for (const auto& entry : fs::directory_iterator(input_dir)) {
-    if (entry.path().extension() == ".json" &&
-	entry.path().filename().string().find("medium-info") != std::string::npos) {
-      std::ifstream file(entry.path());
-      if (file.is_open()) {
-	std::string content((std::istreambuf_iterator<char>(file)),
-			     std::istreambuf_iterator<char>());
-	// Look for "collection_key":"value"
-	size_t pos = content.find("\"collection_key\"");
-	if (pos != std::string::npos) {
-	  size_t start = content.find("\"", pos + 16);
-	  size_t end = content.find("\"", start + 1);
-	  if (start != std::string::npos && end != std::string::npos) {
-	    return content.substr(start + 1, end - start - 1);
-	  }
-	}
-      }
-      break;
-    }
-  }
-  return "unknown";
-}
+{ return input_dir.filename().string(); }
 
-// Helper to calculate directory size in MB
-uintmax_t
-get_directory_size_mb(const fs::path& dir)
-{
-  uintmax_t total_bytes = 0;
-  if (!fs::exists(dir)) return 0;
 
-  for (const auto& entry : fs::recursive_directory_iterator(dir)) {
-    if (fs::is_regular_file(entry.path())) {
+/// Find size of cache directory contents.
+double
+get_directory_size_mb(const fs::path& path)
+{
+  if (!fs::exists(path))
+    throw std::runtime_error("Path does not exist: " + path.string());
+
+  // Follow symlinks by using canonical path
+  fs::path target = fs::is_symlink(path) ? fs::canonical(path) : path;
+  if (!fs::is_directory(target))
+    throw std::runtime_error("Path is not a directory: " + target.string());
+
+  std::uintmax_t total_bytes = 0;
+  for (const auto& entry : fs::recursive_directory_iterator(target))
+    if (fs::is_regular_file(entry.path()))
       total_bytes += fs::file_size(entry.path());
-    }
-  }
-  return total_bytes / (1024 * 1024);  // Convert to MB
+
+  // Convert to MB (1 MB = 1,048,576 bytes)
+  return static_cast<double>(total_bytes) / (1024.0 * 1024.0);
 }
+
 
 // Helper to calculate total size of all torrents' complete media files
 uintmax_t
-get_total_torrent_size_mb(const std::vector<TorrentFile>& torrents)
+get_collection_size_mb(const std::vector<TorrentFile>& torrents)
 {
   uintmax_t total_bytes = 0;
   for (const auto& tf : torrents) {
@@ -303,8 +294,7 @@ process_all_torrents(const vector<TorrentFile>& torrents,
 bool
 write_enriched_output(const fs::path& output_file,
 		      const vector<TorrentFile>& torrents,
-		      const vector<MediaInfoData>& media_data_list,
-		      const vector<fs::path>& downloaded_files,
+		      const process_result& presult,
 		      const std::string& collection_key,
 		      size_t mini_size,
 		      uintmax_t cache_dir_size_mb,
@@ -312,23 +302,28 @@ write_enriched_output(const fs::path& output_file,
 {
   cout << "\n[3/3] Building enriched JSON..." << endl;
 
-  JsonEnricher enricher;
-  string json_output = enricher.build_output(torrents, media_data_list, downloaded_files,
-					     collection_key, mini_size,
-					     cache_dir_size_mb, torrent_total_size_mb);
+  const vector<MediaInfoData>& media_data_list = presult.media_data_list;
+  const vector<fs::path>& downloaded_files = presult.downloaded_files;
 
-  if (!enricher.write_output(output_file.string(), json_output)) {
-    cerr << "✗ Error: Failed to write output file" << endl;
-    return false;
-  }
+  enrichment nrichr;
+  string jdata = nrichr.build_output(torrents, media_data_list,
+				     downloaded_files, collection_key,
+				     mini_size,
+				     cache_dir_size_mb, torrent_total_size_mb);
+  if (!nrichr.write_output(output_file.string(), jdata))
+    {
+      cerr << "✗ Error: Failed to write output file" << endl;
+      return false;
+    }
 
   cout << "✓ Successfully wrote enriched JSON to: " << output_file << endl;
 
-  if (fs::exists(output_file)) {
-    auto size = fs::file_size(output_file);
-    cout << "  Output size: " << fixed << setprecision(2)
-	 << (size / 1024.0 / 1024.0) << " MB" << endl;
-  }
+  if (fs::exists(output_file))
+    {
+      auto size = fs::file_size(output_file);
+      cout << "  Output size: " << fixed << setprecision(2)
+	   << (size / 1024.0 / 1024.0) << " MB" << endl;
+    }
 
   return true;
 }
@@ -402,34 +397,30 @@ int main(int argc, char* argv[])
   cout << "Collection key:    " << collection_key << endl;
 
   // Get sizes for metrics
-  uintmax_t cache_dir_size_mb = get_directory_size_mb(cache_dir);
-  uintmax_t torrent_total_size_mb = get_total_torrent_size_mb(torrents);
+  double cache_dir_size_mb = get_directory_size_mb(cache_dir);
+  double torrent_total_size_mb = get_collection_size_mb(torrents);
 
   // Step 2: Process all torrents (download + extract)
   //const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
   const size_t mini_size = 10 * 1024 * 1024;  // 10 MB
   bool download_p = false;
-  auto process_result = process_all_torrents(torrents, cache_dir, mini_size, download_p);
+  auto process_result = process_all_torrents(torrents, cache_dir,
+					     mini_size, download_p);
 
   // Check for interrupt
-  if (g_interrupted) {
-    cout << "\n! Interrupted. Cleaning up..." << endl;
-    return 130;
-  }
+  if (g_interrupted)
+    {
+      cout << "\n! Interrupted. Cleaning up..." << endl;
+      return 130;
+    }
 
   // Step 3: Write output
-  if (!write_enriched_output(output_file, torrents, process_result.media_data_list,
-			     process_result.downloaded_files, collection_key,
-			     mini_size, cache_dir_size_mb, torrent_total_size_mb)) {
+  if (write_enriched_output(output_file, torrents, process_result, collection_key,
+			    mini_size, cache_dir_size_mb, torrent_total_size_mb))
+    {
+      print_summary(torrents.size(), process_result);
+      return 0;
+    }
+  else
     return 1;
-  }
-
-  // Print summary
-  print_summary(torrents.size(), process_result);
-
-  cout << "\n========================================" << endl;
-  cout << "  Pipeline completed successfully!" << endl;
-  cout << "========================================" << endl;
-
-  return 0;
 }
