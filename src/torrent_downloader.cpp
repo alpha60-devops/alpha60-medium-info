@@ -52,19 +52,17 @@ make_settings_pack()
   // This requires libtorrent version >= 2.0.6
   settings.set_int(settings_pack::disk_io_write_mode, settings_pack::write_through);
 
+  // Setup alerts.
+  using namespace lt::alert_category;
+  auto pack_cat(error | storage | status | tracker | dht);
+  settings.set_int(lt::settings_pack::alert_mask, pack_cat);
+
   return settings;
 }
 
 
 media_downloader::media_downloader()
-{
-  lt::settings_pack pack = make_settings_pack();
-
-  using namespace lt::alert_category;
-  auto pack_cat(error | storage | status | tracker | dht);
-  pack.set_int(lt::settings_pack::alert_mask, pack_cat);
-  session_.apply_settings(pack);
-}
+: session_(make_settings_pack())  { }
 
 media_downloader::~media_downloader()
 {
@@ -235,15 +233,14 @@ media_downloader::download_minimal(const std::string& ifile,
 {
   // Return sized_file_path file whenever possible, as that is the small one.
   using namespace std;
+  optional<fs::path> ret(nullopt);
 
-  fs::path final_file_path;
-  fs::path sized_file_path;
-
+  // Step 1: loop with timeout while downloading largest file.
   // Amount of time before downloading is considered futile.
   // This could be for a number of factors: no peers, private, unreachable.
   const uint unresponsive_seconds(30);
-  std::optional<fs::path> ret(nullopt);
-
+  fs::path prime_file_path;
+  fs::path sized_file_path;
   try
     {
       fs::create_directories(output_dir);
@@ -266,13 +263,12 @@ media_downloader::download_minimal(const std::string& ifile,
 	    }
 	}
       const double max_mb = double(max_size) / (1024.0 * 1024.0);
-      const double target = bytes_to_download;
-      const double target_mb = double(target) / (1024.0 * 1024.0);
+      const double target_mb = double(bytes_to_download) / (1024.0 * 1024.0);
 
       auto target_file_path = files.file_path(largest_file_index);
-      final_file_path = fs::path(output_dir) / target_file_path;
-      sized_file_path = final_file_path.string() + fsuffix;
-      fs::create_directories(final_file_path.parent_path());
+      prime_file_path = fs::path(output_dir) / target_file_path;
+      sized_file_path = prime_file_path.string() + fsuffix;
+      fs::create_directories(prime_file_path.parent_path());
 
       cout << "  target file: (" << target_mb << "/" << max_mb << ")"
 		<< "\t" << target_file_path << endl;
@@ -422,7 +418,7 @@ media_downloader::download_minimal(const std::string& ifile,
 	  bool data_written = false;
 	  for (int retry = 0; retry < waitmaxsec; ++retry)
 	    {
-	      if (verify_data_on_disk(final_file_path, target, 512))
+	      if (verify_data_on_disk(prime_file_path, bytes_to_download, 512))
 		{
 		  data_written = true;
 		  break;
@@ -436,7 +432,7 @@ media_downloader::download_minimal(const std::string& ifile,
 	      // OS-level flush
 	      // Get the actual file path that libtorrent is writing to
 	      // Open the file with POSIX for direct fsync
-	      int fd = open(final_file_path.string().c_str(), O_RDONLY);
+	      int fd = open(prime_file_path.string().c_str(), O_RDONLY);
 	      if (fd != -1)
 		{
 		  cout << "  Calling fsync() on file descriptor..." << endl;
@@ -457,20 +453,21 @@ media_downloader::download_minimal(const std::string& ifile,
       // Confirm data on disk.
       // Check actual file on disk for non-zero data.
       // Create a specially-sized small file for the media archive.
-      const bool ff_created = fs::exists(final_file_path);
-      const auto ff_size = ff_created ? fs::file_size(final_file_path) : 0;
-      const bool ff_size_targetp = ff_size >= ulong(target);
+      const bool ff_created = fs::exists(prime_file_path);
+      const auto ff_size = ff_created ? fs::file_size(prime_file_path) : 0;
+      const bool ff_size_targetp = ff_size >= ulong(bytes_to_download);
       if (ff_created && ff_size_targetp)
 	{
-	  if (verify_data_on_disk(final_file_path, target))
+	  if (verify_data_on_disk(prime_file_path, bytes_to_download))
 	    {
-	      if (!copy_first_n_bytes(final_file_path, sized_file_path, target))
+	      if (!copy_first_n_bytes(prime_file_path, sized_file_path,
+				      bytes_to_download))
 		cerr << "fail: sized file not copied from completed " << endl
-		     << final_file_path.string() << endl;
+		     << prime_file_path.string() << endl;
 	    }
 	  else
-	    cerr << "fail: verification failed (" << ffsize << ") from" << endl
-		 << final_file_path.string() << endl;
+	    cerr << "fail: verification failed (" << ff_size << ") in " << endl
+		 << prime_file_path.string() << endl;
 	}
 
 
@@ -480,11 +477,11 @@ media_downloader::download_minimal(const std::string& ifile,
       if (cleanupp && ff_created)
 	{
 	  error_code ec;
-	  if (!fs::remove(final_file_path, ec))
+	  if (!fs::remove(prime_file_path, ec))
 	    cout << "error: failed to remove file: " << ec.message() << endl;
 	}
 
-      if (verify_data_on_disk(sized_file_path, target))
+      if (verify_data_on_disk(sized_file_path, bytes_to_download))
 	return sized_file_path;
       else
 	{
