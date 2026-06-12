@@ -132,8 +132,7 @@ struct download_result
 };
 
 download_result
-download_torrent_media(const TorrentFile& tf,
-		       const fs::path& cache_dir,
+download_torrent_media(const TorrentFile& tf, const fs::path& cache_dir,
 		       size_t mini_size)
 {
   download_result result;
@@ -153,7 +152,7 @@ download_torrent_media(const TorrentFile& tf,
   }
 
   // Download minimal media file
-  cout << "    Downloading first " << mini_size << "MB..." << endl;
+  cout << "    Downloading first " << mini_size / (1024.0 * 1024.0) << "MB..." << endl;
   media_downloader downloader;
   auto media_path = downloader.download_minimal(tf.torrent_path.string(),
 						torrent_cache_dir.string(),
@@ -185,11 +184,13 @@ download_torrent_media(const TorrentFile& tf,
 // ============================================================
 // 3. Extract media info from downloaded file
 // ============================================================
+
+/// Store result here.
 struct extract_result
 {
   MediaInfoData data;
-  bool success;
-  string error_msg;
+  bool		success;
+  string	error_msg;
 };
 
 extract_result

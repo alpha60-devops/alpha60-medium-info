@@ -1,13 +1,4 @@
 #include "torrent_downloader.hpp"
-#include <iostream>
-#include <fstream>
-#include <chrono>
-#include <thread>
-#include <iomanip>
-#include <unistd.h>
-#include <fcntl.h>
-#include <cstring>
-#include <cerrno>
 
 namespace lt = libtorrent;
 
@@ -61,19 +52,19 @@ make_settings_pack()
   // This requires libtorrent version >= 2.0.6
   settings.set_int(settings_pack::disk_io_write_mode, settings_pack::write_through);
 
+  // Setup alerts.
+  using namespace lt::alert_category;
+  auto pack_cat(error | storage | status | tracker | dht);
+  settings.set_int(lt::settings_pack::alert_mask, pack_cat);
+
   return settings;
 }
 
 
 media_downloader::media_downloader()
-{
-  lt::settings_pack pack = make_settings_pack();
-
-  using namespace lt::alert_category;
-  auto pack_cat(error | storage | status | tracker | dht);
-  pack.set_int(lt::settings_pack::alert_mask, pack_cat);
-  session_.apply_settings(pack);
-}
+//: session_(session_params(make_settings_pack()))
+: session_(make_settings_pack())
+{ }
 
 media_downloader::~media_downloader()
 {
@@ -262,12 +253,12 @@ media_downloader::download_minimal(const std::string& torrent_path,
 		<< "\t" << target_file_path << endl;
 
       // Set up parameters.
-      lt::add_torrent_params params = {};
+      lt::add_torrent_params params = { };
       params.ti = ti;
       params.save_path = output_dir;
-      params.flags = lt::torrent_flags_t{};
       //params.storage_mode = lt::storage_mode_allocate;
       params.storage_mode = lt::storage_mode_sparse;
+      params.flags = lt::torrent_flags_t { };
       params.flags |= lt::torrent_flags::auto_managed;
 
       // Set up download priorities.
@@ -277,18 +268,18 @@ media_downloader::download_minimal(const std::string& torrent_path,
       params.file_priorities = priorities;
 
       // Start BTIH in session...
-      lt::torrent_handle handle = session_.add_torrent(move(params));
+      lt::torrent_handle h = session_.add_torrent(move(params));
       cout << "starting, waiting for metadata...";
       for (int attempt = 0; attempt < 60; ++attempt)
 	{
-	  if (handle.status().has_metadata)
+	  if (h.status().has_metadata)
 	    break;
 	  this_thread::sleep_for(chrono::milliseconds(500));
 	  drain_alerts();
 	}
-      if (!handle.status().has_metadata)
+      if (!h.status().has_metadata)
 	{
-	  session_.remove_torrent(handle);
+	  session_.remove_torrent(h);
 	  return nullopt;
 	}
       cout << "  ...metadata received." << endl;
@@ -306,46 +297,139 @@ media_downloader::download_minimal(const std::string& torrent_path,
       int64_t last_downloaded = 0;
       auto last_rate_time = start_time;
       double current_rate_bps = 0.0;
-      while (session_running_)
-	{
-	  // Start clock.
-	  auto now = chrono::steady_clock::now();
 
-	  // Check for timeout.
-	  auto elapsed = to_seconds(now - start_time).count();
-	  if (elapsed > timeout_seconds)
+      // XX insert example here
+      // https://www.libtorrent.org/tutorial.html#example
+      using sclock = std::chrono::steady_clock;
+
+
+      // return the name of a torrent status enum
+      auto lstate = [](lt::torrent_status::state_t s) -> char const*
+      {
+	switch(s)
+	  {
+	  case lt::torrent_status::checking_files: return "checking";
+	  case lt::torrent_status::downloading_metadata: return "metadata";
+	  case lt::torrent_status::downloading: return "downloading";
+	  case lt::torrent_status::finished: return "finished";
+	  case lt::torrent_status::seeding: return "seeding";
+	  case lt::torrent_status::checking_resume_data: return "checking resume";
+	  default: return "<>";
+	  }
+      };
+
+      // Start alert-based loop
+      try
+	{
+	  sclock::time_point tnow = sclock::now();
+	  for (;session_running_;)
+	    {
+	      std::vector<lt::alert*> alerts;
+	      session_.pop_alerts(&alerts);
+
+	      for (lt::alert const* a : alerts)
+		{
+		  if (auto at = lt::alert_cast<lt::add_torrent_alert>(a))
+		    h = at->handle;
+
+		  // if we receive the finished alert or an error, we're done
+		  if (lt::alert_cast<lt::torrent_finished_alert>(a)) {
+		    h.save_resume_data();
+		    goto done;
+		  }
+
+		  if (lt::alert_cast<lt::torrent_error_alert>(a)) {
+		    std::cout << a->message() << std::endl;
+		    goto done;
+		  }
+
+		  // when resume data is ready, save it
+		  if (auto rd = lt::alert_cast<lt::save_resume_data_alert>(a))
+		    {
+		      // rd->params contains the entire resume state
+		      lt::add_torrent_params params = rd->params;
+
+		      // Serialize to an lt::entry instead of a binary buffer
+		      lt::entry resume_data_entry = lt::write_resume_data(params);
+
+		      std::vector<char> buf;
+		      lt::bencode(std::back_inserter(buf), resume_data_entry);
+
+		      string ofname = final_file_path.string() + ".resume";
+		      std::ofstream out(ofname, std::ios::binary);
+		      out.write(buf.data(), buf.size());
+		      out.close();
+		    }
+
+	// Handle save_resume_data_failed_alert (optional)
+		  if (auto* rfa = lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
+		    std::cerr << "save_resume_data failed: " << rfa->message() << '\n';
+		  }
+
+		  if (auto st = lt::alert_cast<lt::state_update_alert>(a))
+		    {
+		      if (st->status.empty())
+			continue;
+
+		      // we only have a single torrent, so we know which one
+		      // the status is for
+		      lt::torrent_status const& s = st->status[0];
+		      std::cout << "\r" << lstate(s.state) << " "
+				<< (s.download_payload_rate / 1000) << " kB/s "
+				<< (s.total_done / 1000) << " kB ("
+				<< (s.progress_ppm / 10000) << "%) downloaded\x1b[K";
+		      std::cout.flush();
+		    }
+		}
+	      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+	      // ask the session to post a state_update_alert, to update our
+	      // state output for the torrent
+	      session_.post_torrent_updates();
+
+	      // save resume data once every 30 seconds
+	      sclock::time_point tnext = sclock::now();
+	      if (tnext - tnow > std::chrono::seconds(30))
+		{
+		  h.save_resume_data();
+		  tnow = tnext;
+		}
+
+	      // Check for timeout.
+	      auto elapsed = to_seconds(tnow - start_time).count();
+	      if (elapsed > timeout_seconds)
 	    {
 	      cerr << "timeout after " << timeout_seconds << " seconds" << endl;
 	      break;
 	    }
 
-	  // Get status.
-	  auto status = handle.status();
+	      // Get status.
+	      auto status = h.status();
 
-	  // Check if the download has reached the target size.
-	  // status.total_payload_download
-	  // status.all_time_download
-	  const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
-	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
-	    break;
+	      // Check if the download has reached the target size.
+	      // status.total_payload_download
+	      // status.all_time_download
+	      const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
+	      if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
+		break;
 
-	  // Check if stalled.
-	  if (downloaded_mb == 0 && elapsed > unresponsive_seconds)
-	    break;
+	      // Check if stalled.
+	      if (downloaded_mb == 0 && elapsed > unresponsive_seconds)
+		break;
 
-	  // Calculate current download rate
-	  double rate_elapsed = to_seconds(now - last_rate_time).count();
-	  if (rate_elapsed >= 5 && status.total_payload_download > 0)
-	    {
-	      double delta_bytes = status.total_payload_download - last_downloaded;
-	      current_rate_bps = delta_bytes / rate_elapsed;
-	      last_downloaded = status.total_payload_download;
-	      last_rate_time = now;
-	    }
+	      // Calculate current download rate
+	      double rate_elapsed = to_seconds(tnow - last_rate_time).count();
+	      if (rate_elapsed >= 5 && status.total_payload_download > 0)
+		{
+		  double delta_bytes = status.total_payload_download - last_downloaded;
+		  current_rate_bps = delta_bytes / rate_elapsed;
+		  last_downloaded = status.total_payload_download;
+		  last_rate_time = tnow;
+		}
 
 	  // Show progress every n second interval.
 	  const auto status_interval = 5;
-	  auto status_elapsed = chrono::duration_cast<chrono::seconds>(now - last_status_time).count();
+	  auto status_elapsed = chrono::duration_cast<chrono::seconds>(tnow - last_status_time).count();
 	  if (status_elapsed >= status_interval)
 	    {
 	      double rate_kbps = current_rate_bps / 1024.0;
@@ -356,27 +440,47 @@ media_downloader::download_minimal(const std::string& torrent_path,
 		   << " | Speed: " << rate_kbps << " KB/s";
 
 	      cout << endl;
-	      last_status_time = now;
+	      last_status_time = tnow;
 	    }
 
 	  // Force a flush periodically
 	  if (elapsed % 5 == 0 && elapsed > 0)
-	    handle.force_reannounce();
+	    h.force_reannounce();
+
+	    }
+
+	done:
+	  h.save_resume_data(lt::torrent_handle::flush_disk_cache);
+	  std::cout << "\ndone, shutting down" << std::endl;
+	}
+      catch (std::exception& e)
+	{
+	  std::cerr << "Error: " << e.what() << std::endl;
+	}
+
+#if 0
+      // XXX loops start
+      while (session_running_)
+	{
+	  // Start clock.
+	  auto now = chrono::steady_clock::now();
+
 
 	  drain_alerts();
 	  this_thread::sleep_for(chrono::seconds(1));
 	}
+#endif
 
       // Tear down.
       // Pause session, flush data, remove torrent.
-      const double downloaded = handle.status().total_done;
-      handle.pause();
+      const double downloaded = h.status().total_done;
+      h.pause();
 
       // Force cache flush
-      handle.flush_cache();
+      h.flush_cache();
 
       // Request resume data (this also forces dirty blocks to disk)
-      handle.save_resume_data(lt::torrent_handle::save_info_dict);
+      h.save_resume_data(lt::torrent_handle::save_info_dict);
 
       // If bytes were downloaded, wait for write to disk. If not, skip.
       if (downloaded)
@@ -413,7 +517,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	    }
 	}
 
-      session_.remove_torrent(handle);
+      session_.remove_torrent(h);
       this_thread::sleep_for(chrono::seconds(5));
 
 

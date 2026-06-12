@@ -1,6 +1,11 @@
 #ifndef TORRENT_DOWNLOADER_HPP
 #define TORRENT_DOWNLOADER_HPP
 
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
+#include <cerrno>
+
 #include <atomic>
 #include <string>
 #include <optional>
@@ -9,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 
 #include <libtorrent/session.hpp>
 #include <libtorrent/torrent_handle.hpp>
@@ -19,6 +25,10 @@
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/write_resume_data.hpp>
+#include <libtorrent/create_torrent.hpp> // for write_resume_data
+#include <libtorrent/hex.hpp>            // for hex::encode
+#include <libtorrent/bencode.hpp>        // for bencode
 
 namespace fs = std::filesystem;
 namespace lt = libtorrent;
