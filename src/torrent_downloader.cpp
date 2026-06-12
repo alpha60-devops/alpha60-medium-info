@@ -1,13 +1,4 @@
 #include "torrent_downloader.hpp"
-#include <iostream>
-#include <fstream>
-#include <chrono>
-#include <thread>
-#include <iomanip>
-#include <unistd.h>
-#include <fcntl.h>
-#include <cstring>
-#include <cerrno>
 
 namespace lt = libtorrent;
 
@@ -88,9 +79,35 @@ media_downloader::drain_alerts()
   session_.pop_alerts(&alerts);
   for (lt::alert* alert : alerts)
     {
+      // alert_category_storage
       if (auto* te = lt::alert_cast<lt::torrent_error_alert>(alert))
 	std::cerr << "  [ERROR] " << te->error.message() << std::endl;
     }
+}
+
+// Returns downloaded
+double
+media_downloader::drain_flush_alerts(lt::torrent_handle& handle)
+{
+  // Wait for up to 1 second for a libtorrent alert
+  double downloaded(0);
+  lt::alert const* a = session_.wait_for_alert(lt::seconds(1));
+  if (a != nullptr)
+    {
+      std::vector<lt::alert*> alerts;
+      session_.pop_alerts(&alerts);
+
+      for (lt::alert* alert : alerts)
+	{
+	  if (auto* te = lt::alert_cast<lt::cache_flushed_alert>(alert))
+	    {
+	      auto status = handle.status();
+	      downloaded = status.total_done;
+	      break;
+	    }
+	}
+    }
+  return downloaded;
 }
 
 /// Copy the first N bytes from source file to destination file
@@ -210,7 +227,7 @@ std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
 /// @param output_dir result files
 /// @param fsuffix the suffix used on the minimal media file
 std::optional<fs::path>
-media_downloader::download_minimal(const std::string& torrent_path,
+media_downloader::download_minimal(const std::string& ifile,
 				   const std::string& output_dir,
 				   const std::int64_t bytes_to_download,
 				   const int timeout_seconds,
@@ -225,16 +242,15 @@ media_downloader::download_minimal(const std::string& torrent_path,
   // Amount of time before downloading is considered futile.
   // This could be for a number of factors: no peers, private, unreachable.
   const uint unresponsive_seconds(30);
+  std::optional<fs::path> ret(nullopt);
 
   try
     {
       fs::create_directories(output_dir);
 
-      string path_str = torrent_path;
-      auto ti = make_shared<lt::torrent_info>(path_str);
-
+      auto ti = make_shared<lt::torrent_info>(ifile);
       if (ti->num_files() == 0)
-	return nullopt;
+	return ret;
 
       // Find the largest file, and prepare to download that.
       const auto& files = ti->files();
@@ -277,25 +293,26 @@ media_downloader::download_minimal(const std::string& torrent_path,
       params.file_priorities = priorities;
 
       // Start BTIH in session...
+      // XXX or this-try-scope session?
       lt::torrent_handle handle = session_.add_torrent(move(params));
       cout << "starting, waiting for metadata...";
       for (int attempt = 0; attempt < 60; ++attempt)
 	{
 	  if (handle.status().has_metadata)
 	    break;
-	  this_thread::sleep_for(chrono::milliseconds(500));
 	  drain_alerts();
+	  this_thread::sleep_for(chrono::milliseconds(500));
 	}
       if (!handle.status().has_metadata)
 	{
 	  session_.remove_torrent(handle);
-	  return nullopt;
+	  return ret;
 	}
       cout << "  ...metadata received." << endl;
 
-      // Start loop...
-      // End when:
-      /// 1: enough to make sized_file
+      // Start timeout loop...
+      // Ends if:
+      /// 1: enough downloaded to make sized_file
       /// 2: timeout
       auto start_time = chrono::steady_clock::now();
       auto last_status_time = start_time;
@@ -345,7 +362,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
 	  // Show progress every n second interval.
 	  const auto status_interval = 5;
-	  auto status_elapsed = chrono::duration_cast<chrono::seconds>(now - last_status_time).count();
+	  auto status_elapsed = to_seconds(now - last_status_time).count();
 	  if (status_elapsed >= status_interval)
 	    {
 	      double rate_kbps = current_rate_bps / 1024.0;
@@ -369,14 +386,31 @@ media_downloader::download_minimal(const std::string& torrent_path,
 
       // Tear down.
       // Pause session, flush data, remove torrent.
-      const double downloaded = handle.status().total_done;
-      handle.pause();
+      double downloaded(0.0);
+      try
+	{
+	  handle.pause();
+	  handle.flush_cache();
 
-      // Force cache flush
-      handle.flush_cache();
+	  // XXX? necessary or just slowing us down?
+	  // Request resume data (this also forces dirty blocks to disk)
+	  handle.save_resume_data(lt::torrent_handle::save_info_dict);
 
-      // Request resume data (this also forces dirty blocks to disk)
-      handle.save_resume_data(lt::torrent_handle::save_info_dict);
+	  cout << "drain_flush_cache: ";
+	  const uint max_wait(10);
+	  for (uint i = 0; i < max_wait && downloaded == 0; ++i)
+	    {
+	      cout << i << ", ";
+	      downloaded = drain_flush_alerts(handle);
+	    }
+	  cout << endl;
+	}
+      catch (std::exception& e)
+	{
+	  cout << "download_minimal:: exception thrown during tear down to disk";
+	  cout << endl;
+	  cout << e.what();
+	}
 
       // If bytes were downloaded, wait for write to disk. If not, skip.
       if (downloaded)
@@ -395,6 +429,8 @@ media_downloader::download_minimal(const std::string& torrent_path,
 		}
 	      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 	    }
+#if 0
+	  // XXX not useful
 	  if (!data_written)
 	    {
 	      // OS-level flush
@@ -411,6 +447,7 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	      else
 		cerr << "  Invalid file for fsync: " << strerror(errno) << endl;
 	    }
+#endif
 	}
 
       session_.remove_torrent(handle);
@@ -428,10 +465,12 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	  if (verify_data_on_disk(final_file_path, target))
 	    {
 	      if (!copy_first_n_bytes(final_file_path, sized_file_path, target))
-		cerr << "fail: BTIH did not create smaller sized file" << endl;
+		cerr << "fail: sized file not copied from completed " << endl
+		     << final_file_path.string() << endl;
 	    }
 	  else
-	    cerr << "fail: BTIH did not serialize to disk" << endl;
+	    cerr << "fail: verification failed (" << ffsize << ") from" << endl
+		 << final_file_path.string() << endl;
 	}
 
 
@@ -451,16 +490,16 @@ media_downloader::download_minimal(const std::string& torrent_path,
 	{
 	  if (downloaded == 0)
 	    {
-	      ofno << torrent_path << endl;
+	      ofno << ifile << endl;
 	      ofno.flush();
 	    }
-	  return nullopt;
+	  return ret;
 	}
     }
 
   catch (const exception& e)
     {
       cerr << "Exception: " << e.what() << endl;
-      return nullopt;
+      return ret;
     }
 }
