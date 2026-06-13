@@ -505,7 +505,7 @@ media_downloader::download_minimal(const std::string& ifile,
 
   // Clean up
   // Remove large file and used sized file if possible.
-  const bool cleanupp(false); // XXX
+  const bool cleanupp(true);
   if (cleanupp && ff_created)
     {
       error_code ec;

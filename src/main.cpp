@@ -245,13 +245,16 @@ process_all_torrents(const vector<TorrentFile>& torrents,
 
   cout << "\n[2/3] " << (download_p ? "Downloading" : "Using cache only") << " media ..." << endl;
 
-  for (size_t i = 0; i < torrents.size() && !g_interrupted; ++i) {
-    const auto& tf = torrents[i];
+  for (size_t i = 0; i < torrents.size() && !g_interrupted; ++i)
+    {
+      const auto& tf = torrents[i];
     cout << "\n  [" << (i+1) << "/" << torrents.size() << "] " << tf.name << endl;
 
     fs::path torrent_cache_dir = cache_dir / tf.btih;
     fs::path cached_file = torrent_cache_dir / "media_sample";
-    bool cache_exists = fs::exists(cached_file) && fs::file_size(cached_file) >= mini_size;
+
+    //bool cache_exists = fs::exists(cached_file) && fs::file_size(cached_file) >= mini_size;
+    bool cache_exists = fs::exists(cached_file);
 
     // If cache exists, use it
     if (cache_exists) {
@@ -423,6 +426,7 @@ int main(int argc, char* argv[])
   double torrent_total_size_mb = get_collection_size_mb(torrents);
 
   // Step 2: Process all torrents (download + extract)
+  //const size_t mini_size = 128 * 1024 * 1024;  // 64 MB
   //const size_t mini_size = 64 * 1024 * 1024;  // 64 MB
   //const size_t mini_size = 32 * 1024 * 1024;  // 32 MB
   const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
