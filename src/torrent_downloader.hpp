@@ -34,12 +34,8 @@ namespace fs = std::filesystem;
 namespace lt = libtorrent;
 
 /// Downloader encapsulation.
-class media_downloader
+struct media_downloader
 {
-public:
-  media_downloader();
-  ~media_downloader();
-
   // Download only the first 'bytes_to_download' bytes of the media file
   // Returns path to the downloaded partial file, or empty if failed
   // 10 MB default,
@@ -51,11 +47,17 @@ public:
 		   const std::string fsuffix = ".sized");
 
 private:
-  lt::session		session_;
-  std::atomic<bool>	session_running_{true};
 
-  void drain_alerts();
-  double drain_flush_alerts(lt::torrent_handle& handle);
+  void
+  drain_alerts(lt::session& sesh);
+
+  bool
+  drain_alerts(lt::session& sesh, lt::torrent_handle& handle);
 };
+
+// Convenience.
+inline uint
+to_mb(double d)
+{ return d / (1024 * 1024); }
 
 #endif // TORRENT_DOWNLOADER_HPP

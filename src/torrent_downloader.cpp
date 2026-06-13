@@ -61,51 +61,70 @@ make_settings_pack()
 }
 
 
-media_downloader::media_downloader()
-: session_(make_settings_pack())  { }
-
-media_downloader::~media_downloader()
-{
-  session_running_ = false;
-  session_.abort();
-}
-
 void
-media_downloader::drain_alerts()
+media_downloader::drain_alerts(lt::session& sesh)
 {
   std::vector<lt::alert*> alerts;
-  session_.pop_alerts(&alerts);
+  sesh.pop_alerts(&alerts);
   for (lt::alert* alert : alerts)
     {
       // alert_category_storage
-      if (auto* te = lt::alert_cast<lt::torrent_error_alert>(alert))
-	std::cerr << "  [ERROR] " << te->error.message() << std::endl;
+      if (lt::alert_cast<lt::torrent_error_alert>(alert))
+	std::cerr << "  [ERROR] " << alert->message() << std::endl;
     }
 }
 
-// Returns downloaded
-double
-media_downloader::drain_flush_alerts(lt::torrent_handle& handle)
+// Returns downloaded, waits for cache flushes
+bool
+media_downloader::drain_alerts(lt::session& sesh, lt::torrent_handle& handle)
 {
   // Wait for up to 1 second for a libtorrent alert
-  double downloaded(0);
-  lt::alert const* a = session_.wait_for_alert(lt::seconds(1));
+  bool ret(false);
+  lt::alert const* a = sesh.wait_for_alert(lt::seconds(1));
   if (a != nullptr)
     {
       std::vector<lt::alert*> alerts;
-      session_.pop_alerts(&alerts);
+      sesh.pop_alerts(&alerts);
 
       for (lt::alert* alert : alerts)
 	{
-	  if (auto* te = lt::alert_cast<lt::cache_flushed_alert>(alert))
+#if 0
+	  if (auto at = lt::alert_cast<lt::add_torrent_alert>(alert))
+	    handle = at->handle;
+#endif
+
+	  if (lt::alert_cast<lt::torrent_removed_alert>(alert))
 	    {
-	      auto status = handle.status();
-	      downloaded = status.total_done;
+	      std::cout << "torrent removed " << std::endl;
 	      break;
 	    }
+
+	  if (lt::alert_cast<lt::torrent_finished_alert>(alert))
+	    {
+	      std::cout << "torrent finished " << alert->message() << std::endl;
+	      ret = true;
+	      break;
+	    }
+
+	  if (lt::alert_cast<lt::torrent_error_alert>(alert))
+	    {
+	      std::cout << "torrent error: " << alert->message() << std::endl;
+	      ret = true;
+	      break;
+	    }
+
+	  if (lt::alert_cast<lt::cache_flushed_alert>(alert))
+	    {
+	      std::cout << "cache flushed " << std::endl;
+	    }
+
+	  if (lt::alert_cast<lt::save_resume_data_alert>(a))
+	     {
+	       std::cout << "save resume " << std::endl;
+	     }
 	}
     }
-  return downloaded;
+  return ret;
 }
 
 /// Copy the first N bytes from source file to destination file
@@ -120,46 +139,61 @@ copy_first_n_bytes(const fs::path& source, const fs::path& destination,
       return false;
     }
 
-  std::ofstream dst(destination, std::ios::binary);
-  if (!dst.is_open())
-    {
-      std::cerr << "[ERROR] Cannot create destination file: " << destination << std::endl;
-      return false;
-  }
-
-  std::int64_t buffer_size = 1024 * 1024; // 1MB buffer
+  // Read.
+  //  std::int64_t buffer_size = 1024 * 1024; // 1MB buffers
+  std::int64_t buffer_size = num_bytes;
   std::vector<char> buffer(buffer_size);
   std::int64_t remaining = num_bytes;
   std::int64_t total_copied = 0;
-
   while (remaining > 0)
     {
       size_t to_read = static_cast<size_t>(std::min(remaining, buffer_size));
       src.read(buffer.data(), to_read);
       std::streamsize bytes_read = src.gcount();
-      if (bytes_read == 0)
+      if (bytes_read != 0)
+	{
+	  remaining -= bytes_read;
+	  total_copied += bytes_read;
+	}
+      else
 	break;
-      dst.write(buffer.data(), bytes_read);
-      remaining -= bytes_read;
-      total_copied += bytes_read;
     }
-
-  dst.flush();
-  dst.close();
   src.close();
 
   // Ensure data is written to disk before returning
-  int fd = open(destination.string().c_str(), O_WRONLY);
-  if (fd != -1)
+  bool verifiedp = total_copied >= num_bytes;
+  if (verifiedp)
     {
-      if (fsync(fd) == 0)
-	std::cout << "  fsync() confirmed for .sized file" << std::endl;
-      else
-	std::cerr << "  fsync() failed for .sized file: " << strerror(errno) << std::endl;
-      close(fd);
+      // Write.
+      std::ofstream dst(destination, std::ios::binary);
+      if (!dst.is_open())
+	{
+	  std::cerr << "cannot create destination file: " << destination << std::endl;
+	  return false;
+	}
+      dst.write(buffer.data(), total_copied);
+      dst.flush();
+      dst.close();
+
+      // Verify.
+      int fd = open(destination.string().c_str(), O_WRONLY);
+      if (fd != -1)
+	{
+	  if (fsync(fd) == 0)
+	    std::cout << "fsync() confirmed for .sized file";
+	  else
+	    std::cout << "fsync() failed for .sized file: " << strerror(errno);
+	  std::cout << std::endl;
+	  close(fd);
+	}
+    }
+  else
+    {
+      std::cout << "incomplete (" << total_copied <<") copied of "
+		<< num_bytes << std::endl;
     }
 
-  return total_copied >= num_bytes;
+  return verifiedp;
 }
 
 
@@ -208,14 +242,20 @@ verify_data_on_disk(const fs::path& file_path,
 }
 
 
-// Log if no peers to file.
-const std::ios_base::openmode ofm = std::ios_base::out | std::ios_base::app;
-std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
+/// Log if no peers, no downloads to file.
+std::ofstream&
+log_suspect()
+{
+  const std::string ofname("download.suspect-or-no-peers.log");
+  const std::ios_base::openmode ofm = std::ios_base::out | std::ios_base::app;
+  static std::ofstream ofsus(ofname, ofm);
+  return ofsus;
+}
 
 
-/// Download a minimum-sized chunk of the largest media file so that
-/// mediainfo can be used to determine the frame rate, frame size,
-/// audio and subtitles.
+/// Download a minimum-sized chunk of the largest media file.
+/// So that ffmpeg, mediainfo, and others can be used to determine the
+/// frame rate, frame size, audio and subtitles.
 ///
 /// Download the largest file in the @parm torrent_path given as an
 /// argument, but stop at 10MB (or @param bytes_to_download) and
@@ -223,7 +263,7 @@ std::ofstream ofno("download.suspect-or-no-peers.log", ofm);
 ///
 /// @param timeout_seconds the number of seconds to loop while wating for data.
 /// @param output_dir result files
-/// @param fsuffix the suffix used on the minimal media file
+/// @param fsuffix the suffix used on the minimal media file, default ".sized"
 std::optional<fs::path>
 media_downloader::download_minimal(const std::string& ifile,
 				   const std::string& output_dir,
@@ -235,10 +275,11 @@ media_downloader::download_minimal(const std::string& ifile,
   using namespace std;
   optional<fs::path> ret(nullopt);
 
-  // Step 1: loop with timeout while downloading largest file.
   // Amount of time before downloading is considered futile.
   // This could be for a number of factors: no peers, private, unreachable.
-  const uint unresponsive_seconds(30);
+  const int unresponsive_seconds(30);
+  const int minimum_seconds(5);
+
   fs::path prime_file_path;
   fs::path sized_file_path;
   try
@@ -262,8 +303,8 @@ media_downloader::download_minimal(const std::string& ifile,
 	      largest_file_index = idx;
 	    }
 	}
-      const double max_mb = double(max_size) / (1024.0 * 1024.0);
-      const double target_mb = double(bytes_to_download) / (1024.0 * 1024.0);
+      const double max_mb = to_mb(max_size);
+      const double target_mb = to_mb(bytes_to_download);
 
       auto target_file_path = files.file_path(largest_file_index);
       prime_file_path = fs::path(output_dir) / target_file_path;
@@ -274,13 +315,13 @@ media_downloader::download_minimal(const std::string& ifile,
 		<< "\t" << target_file_path << endl;
 
       // Set up parameters.
-      lt::add_torrent_params params = {};
+      lt::add_torrent_params params = { };
       params.ti = ti;
       params.save_path = output_dir;
       params.flags = lt::torrent_flags_t{};
+      params.flags |= lt::torrent_flags::auto_managed;
       //params.storage_mode = lt::storage_mode_allocate;
       params.storage_mode = lt::storage_mode_sparse;
-      params.flags |= lt::torrent_flags::auto_managed;
 
       // Set up download priorities.
       vector<lt::download_priority_t> priorities;
@@ -289,19 +330,19 @@ media_downloader::download_minimal(const std::string& ifile,
       params.file_priorities = priorities;
 
       // Start BTIH in session...
-      // XXX or this-try-scope session?
-      lt::torrent_handle handle = session_.add_torrent(move(params));
+      lt::session sesh(make_settings_pack());
+      lt::torrent_handle handle = sesh.add_torrent(move(params));
       cout << "starting, waiting for metadata...";
       for (int attempt = 0; attempt < 60; ++attempt)
 	{
 	  if (handle.status().has_metadata)
 	    break;
-	  drain_alerts();
+	  drain_alerts(sesh);
 	  this_thread::sleep_for(chrono::milliseconds(500));
 	}
       if (!handle.status().has_metadata)
 	{
-	  session_.remove_torrent(handle);
+	  sesh.remove_torrent(handle);
 	  return ret;
 	}
       cout << "  ...metadata received." << endl;
@@ -319,7 +360,7 @@ media_downloader::download_minimal(const std::string& ifile,
       int64_t last_downloaded = 0;
       auto last_rate_time = start_time;
       double current_rate_bps = 0.0;
-      while (session_running_)
+      while (true)
 	{
 	  // Start clock.
 	  auto now = chrono::steady_clock::now();
@@ -335,15 +376,15 @@ media_downloader::download_minimal(const std::string& ifile,
 	  // Get status.
 	  auto status = handle.status();
 
-	  // Check if the download has reached the target size.
+	  // Check if the download has reached the target size and time.
 	  // status.total_payload_download
 	  // status.all_time_download
-	  const double downloaded_mb = status.total_done / (1024.0 * 1024.0);
-	  if ((downloaded_mb >= target_mb || downloaded_mb >= max_mb))
+	  const double downloaded_mb = to_mb(status.total_done);
+	  if (elapsed >= minimum_seconds && downloaded_mb >= target_mb)
 	    break;
 
 	  // Check if stalled.
-	  if (downloaded_mb == 0 && elapsed > unresponsive_seconds)
+	  if (elapsed > unresponsive_seconds && status.download_rate == 0)
 	    break;
 
 	  // Calculate current download rate
@@ -376,127 +417,112 @@ media_downloader::download_minimal(const std::string& ifile,
 	  if (elapsed % 5 == 0 && elapsed > 0)
 	    handle.force_reannounce();
 
-	  drain_alerts();
+	  drain_alerts(sesh);
 	  this_thread::sleep_for(chrono::seconds(1));
 	}
 
       // Tear down.
       // Pause session, flush data, remove torrent.
-      double downloaded(0.0);
       try
 	{
 	  handle.pause();
 	  handle.flush_cache();
 
-	  // XXX? necessary or just slowing us down?
 	  // Request resume data (this also forces dirty blocks to disk)
 	  handle.save_resume_data(lt::torrent_handle::save_info_dict);
 
-	  cout << "drain_flush_cache: ";
+	  // Session shutdown handled later.
 	  const uint max_wait(10);
-	  for (uint i = 0; i < max_wait && downloaded == 0; ++i)
+	  double downloaded = handle.status().total_done;
+	  if (downloaded != 0)
+	    {
+	      cout << "handle tear down: ";
+	      for (uint i = 0; i < max_wait; ++i)
+		{
+		  cout << i << ", ";
+		  drain_alerts(sesh, handle);
+		}
+	      cout << endl;
+	    }
+
+	  if (verify_data_on_disk(prime_file_path, bytes_to_download))
+	    cout << "tear down prime file validated" << endl;
+
+	  sesh.remove_torrent(handle);
+	  bool removedp(false);
+	  for (uint i = 0; i < max_wait && !removedp; ++i)
 	    {
 	      cout << i << ", ";
-	      downloaded = drain_flush_alerts(handle);
+	      removedp = drain_alerts(sesh, handle);
 	    }
-	  cout << endl;
 	}
       catch (std::exception& e)
 	{
-	  cout << "download_minimal:: exception thrown during tear down to disk";
+	  cout << "download_minimal:: exception thrown during tear down ";
 	  cout << endl;
 	  cout << e.what();
+	  cout << endl;
 	}
 
-      // If bytes were downloaded, wait for write to disk. If not, skip.
-      if (downloaded)
-	{
-	  // Wait for flush to complete - monitor file or wait fixed time
-	  // The safe approach: wait a few seconds for async writes to complete
-	  // A better approach: poll file size/verify_data_on_disk with timeout
-	  const int waitmaxsec = 8;
-	  bool data_written = false;
-	  for (int retry = 0; retry < waitmaxsec; ++retry)
-	    {
-	      if (verify_data_on_disk(prime_file_path, bytes_to_download, 512))
-		{
-		  data_written = true;
-		  break;
-		}
-	      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	    }
-#if 0
-	  // XXX not useful
-	  if (!data_written)
-	    {
-	      // OS-level flush
-	      // Get the actual file path that libtorrent is writing to
-	      // Open the file with POSIX for direct fsync
-	      int fd = open(prime_file_path.string().c_str(), O_RDONLY);
-	      if (fd != -1)
-		{
-		  cout << "  Calling fsync() on file descriptor..." << endl;
-		  if (fsync(fd) != 0)
-		    cerr << "  ..fsync() failed: " << strerror(errno) << endl;
-		  close(fd);
-		}
-	      else
-		cerr << "  Invalid file for fsync: " << strerror(errno) << endl;
-	    }
-#endif
-	}
+      // Initiate session shutdown.
+      lt::session_proxy proxy = sesh.abort(); // just this is scope async
 
-      session_.remove_torrent(handle);
-      this_thread::sleep_for(chrono::seconds(5));
-
-
-      // Confirm data on disk.
-      // Check actual file on disk for non-zero data.
-      // Create a specially-sized small file for the media archive.
-      const bool ff_created = fs::exists(prime_file_path);
-      const auto ff_size = ff_created ? fs::file_size(prime_file_path) : 0;
-      const bool ff_size_targetp = ff_size >= ulong(bytes_to_download);
-      if (ff_created && ff_size_targetp)
-	{
-	  if (verify_data_on_disk(prime_file_path, bytes_to_download))
-	    {
-	      if (!copy_first_n_bytes(prime_file_path, sized_file_path,
-				      bytes_to_download))
-		cerr << "fail: sized file not copied from completed " << endl
-		     << prime_file_path.string() << endl;
-	    }
-	  else
-	    cerr << "fail: verification failed (" << ff_size << ") in " << endl
-		 << prime_file_path.string() << endl;
-	}
-
-
-      // Clean up
-      // Remove large file and used sized file if possible.
-      const bool cleanupp(true);
-      if (cleanupp && ff_created)
-	{
-	  error_code ec;
-	  if (!fs::remove(prime_file_path, ec))
-	    cout << "error: failed to remove file: " << ec.message() << endl;
-	}
-
-      if (verify_data_on_disk(sized_file_path, bytes_to_download))
-	return sized_file_path;
-      else
-	{
-	  if (downloaded == 0)
-	    {
-	      ofno << ifile << endl;
-	      ofno.flush();
-	    }
-	  return ret;
-	}
+      // ...but force the proxy to destroy itself right here.  This line
+      // blocks this background thread until shutdown is 100% finished.
+      proxy = lt::session_proxy();
+      cout << "session done" << endl;
     }
-
   catch (const exception& e)
     {
-      cerr << "Exception: " << e.what() << endl;
+      cerr << "download_minimal: error, exception thrown " << e.what() << endl;
+      return ret;
+    }
+
+  // Settle.
+  this_thread::sleep_for(chrono::seconds(5));
+
+  // Create sized archive file from prime download file.
+  // Confirm prime_file data on disk, create sized file.
+  // Check actual file on disk for non-zero data.
+  // Create a specially-sized small file for the media archive.
+  const bool ff_created = fs::exists(prime_file_path);
+  const auto ff_size = ff_created ? fs::file_size(prime_file_path) : 0;
+  const bool ff_size_targetp = ff_size >= ulong(bytes_to_download);
+  if (ff_created && ff_size_targetp)
+    {
+      if (verify_data_on_disk(prime_file_path, bytes_to_download))
+	{
+	  if (!copy_first_n_bytes(prime_file_path, sized_file_path,
+				  bytes_to_download))
+	    cerr << "fail: sized file not copied from prime file " << endl
+		 << prime_file_path.string() << endl;
+	}
+      else
+	cerr << "fail: verification failed ("
+	     << to_mb(ff_size) << ") in " << endl
+	     << prime_file_path.string() << endl;
+    }
+
+  // Clean up
+  // Remove large file and used sized file if possible.
+  const bool cleanupp(false); // XXX
+  if (cleanupp && ff_created)
+    {
+      error_code ec;
+      if (!fs::remove(prime_file_path, ec))
+	cout << "error: failed to remove file: " << ec.message() << endl;
+    }
+
+  if (verify_data_on_disk(sized_file_path, bytes_to_download))
+    return sized_file_path;
+  else
+    {
+      if (ff_size == 0)
+	{
+	  ofstream& ofno = log_suspect();
+	  ofno << ifile << endl;
+	  ofno.flush();
+	}
       return ret;
     }
 }

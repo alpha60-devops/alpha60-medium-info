@@ -86,8 +86,7 @@ get_directory_size_mb(const fs::path& path)
 	}
     }
 
-  // Convert to MB (1 MB = 1,048,576 bytes)
-  return static_cast<double>(total_bytes) / (1024.0 * 1024.0);
+  return to_mb(total_bytes);
 }
 
 
@@ -96,10 +95,9 @@ uintmax_t
 get_collection_size_mb(const std::vector<TorrentFile>& torrents)
 {
   uintmax_t total_bytes = 0;
-  for (const auto& tf : torrents) {
+  for (const auto& tf : torrents)
     total_bytes += tf.total_size;
-  }
-  return total_bytes / (1024 * 1024);  // Convert to MB
+  return to_mb(total_bytes);
 }
 
 // ============================================================
@@ -145,15 +143,16 @@ download_torrent_media(const TorrentFile& tf,
 
   // Check if we already have a cached download
   fs::path cached_file = torrent_cache_dir / "media_sample";
-  if (fs::exists(cached_file) && fs::file_size(cached_file) >= mini_size) {
-    cout << "    Using cached download: " << cached_file << endl;
-    result.media_path = cached_file;
-    result.success = true;
-    return result;
-  }
+  if (fs::exists(cached_file) && fs::file_size(cached_file) >= mini_size)
+    {
+      cout << "    Using cached download: " << cached_file << endl;
+      result.media_path = cached_file;
+      result.success = true;
+      return result;
+    }
 
   // Download minimal media file
-  cout << "    Downloading first " << mini_size << "MB..." << endl;
+  cout << "    Downloading first " << to_mb(mini_size) << "MB..." << endl;
   media_downloader downloader;
   auto media_path = downloader.download_minimal(tf.torrent_path.string(),
 						torrent_cache_dir.string(),
@@ -339,13 +338,13 @@ write_enriched_output(const fs::path& output_file,
       return false;
     }
 
-  cout << "✓ Successfully wrote enriched JSON to: " << output_file << endl;
+  cout << "Wrote enriched JSON to: " << output_file << endl;
 
   if (fs::exists(output_file))
     {
       auto size = fs::file_size(output_file);
       cout << "  Output size: " << fixed << setprecision(2)
-	   << (size / 1024.0 / 1024.0) << " MB" << endl;
+	   << to_mb(size) << " MB" << endl;
     }
 
   return true;
@@ -424,6 +423,8 @@ int main(int argc, char* argv[])
   double torrent_total_size_mb = get_collection_size_mb(torrents);
 
   // Step 2: Process all torrents (download + extract)
+  //const size_t mini_size = 64 * 1024 * 1024;  // 64 MB
+  //const size_t mini_size = 32 * 1024 * 1024;  // 32 MB
   const size_t mini_size = 16 * 1024 * 1024;  // 16 MB
   //const size_t mini_size = 10 * 1024 * 1024;  // 10 MB
   bool download_p = true;
